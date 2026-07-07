@@ -29,6 +29,8 @@ import type {
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
+  CreateSchemaVersionInput,
+  CreateSchemaVersionResult,
   DeploymentContext,
   DeploymentDiff,
   DeploymentRecord as LegacyDeploymentRecord,
@@ -46,6 +48,10 @@ import type {
   MappingSaveResult,
   MappingVersion,
   MappingVersionEntry,
+  MappingSchemaUpgradeApplyInput,
+  MappingSchemaUpgradeApplyResult,
+  MappingSchemaUpgradePreviewInput,
+  MappingSchemaUpgradePreviewResult,
   MappingMetadata,
   ProjectValueTable,
   ProjectValueTableRevision,
@@ -53,20 +59,25 @@ import type {
   Project,
   ProjectDetail,
   ProjectMetadata,
-  PublishSchemaInput,
+  SaveSchemaDraftInput,
+  SaveSchemaDraftResult,
+  SchemaDraftRevision,
   SchemaDetail,
   SchemaMetadata,
   SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
+  SchemaVersionEntry,
   ServerPreviewInput,
   ServerPreviewResult,
+  SetDefaultSchemaSampleInput,
   SmartFixInput,
   SmartFixResult,
   SuggestExpressionInput,
   SuggestExpressionResult,
   TemplateDetail,
   TemplateMetadata,
+  UpdateSchemaSampleInput,
   ValueTableDiffChange,
   ValueTableDiffPage,
   ValueTableDirectionSupport,
@@ -166,6 +177,30 @@ interface StoredSchema {
   samplePayloadContentById?: Record<string, SchemaSamplePayloadContent>;
 }
 
+interface StoredSchemaDraftRevision {
+  readonly schemaId: string;
+  readonly revision: number;
+  readonly basedOnVersion: number | null;
+  readonly contentHash: string;
+  readonly savedAt: string;
+  readonly savedBy: string;
+}
+
+interface StoredSchemaVersionEntry {
+  readonly schemaId: string;
+  readonly version: number;
+  readonly schemaVersionId: string;
+  readonly draftRevision: number;
+  readonly basedOnVersion: number | null;
+  readonly contentHash: string;
+  readonly versionStatus: 'creating' | 'ready' | 'failed' | 'deprecated';
+  readonly indexStatus: 'pending' | 'ready' | 'failed';
+  readonly impactStatus: 'pending' | 'ready' | 'failed';
+  readonly sampleValidationStatus: 'pending' | 'ready' | 'failed';
+  readonly createdAt: string;
+  readonly createdBy: string;
+}
+
 interface StoredMapping {
   metadata: MappingMetadata;
   config: MappingConfig;
@@ -221,11 +256,20 @@ function normalizeCanonicalEnrichmentSources(value: unknown): NonNullable<Mappin
 
     aliases.add(alias);
     const schemaId = typeof candidate.schemaId === 'string' ? candidate.schemaId.trim() : '';
+    const schemaVersion =
+      typeof candidate.schemaVersion === 'number' && Number.isInteger(candidate.schemaVersion) && candidate.schemaVersion > 0
+        ? candidate.schemaVersion
+        : undefined;
+    const schemaVersionId = typeof candidate.schemaVersionId === 'string' ? candidate.schemaVersionId.trim() : '';
+    const contentHash = typeof candidate.contentHash === 'string' ? candidate.contentHash.trim() : '';
     const required = typeof candidate.required === 'boolean' ? candidate.required : true;
     const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
     normalized.push({
       alias,
       ...(schemaId ? { schemaId } : {}),
+      ...(schemaVersion !== undefined ? { schemaVersion } : {}),
+      ...(schemaVersionId ? { schemaVersionId } : {}),
+      ...(contentHash ? { contentHash } : {}),
       required,
       ...(description ? { description } : {}),
     });
@@ -262,6 +306,34 @@ function normalizeOptionalBusinessContext(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function encodePreviewPayload(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function decodePreviewPayload<T>(previewId: string): T | null {
+  try {
+    const base64 = previewId
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+    const padded = `${base64}${'='.repeat((4 - (base64.length % 4)) % 4)}`;
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const decoded = new TextDecoder().decode(bytes);
+    return JSON.parse(decoded) as T;
+  } catch {
+    return null;
+  }
 }
 
 function mergeWithSeededCdmMetadata(items: readonly SchemaMetadata[]): SchemaMetadata[] {
@@ -406,6 +478,14 @@ export class LocalStorageAdapter implements ApiAdapter {
     return `keyra:revisions:${mappingId}`;
   }
 
+  private schemaDraftRevisionKey(schemaId: string): string {
+    return `keyra:schema-drafts:${schemaId}`;
+  }
+
+  private schemaVersionKey(schemaId: string): string {
+    return `keyra:schema-versions:${schemaId}`;
+  }
+
   private sortObject(value: unknown): unknown {
     if (Array.isArray(value)) {
       return value.map((item) => this.sortObject(item));
@@ -430,6 +510,19 @@ export class LocalStorageAdapter implements ApiAdapter {
       version: 0,
     };
     const json = JSON.stringify(this.sortObject(normalized));
+
+    if (globalThis.crypto?.subtle) {
+      const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
+      return Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+    }
+
+    return json;
+  }
+
+  private async computeStableHash(content: unknown): Promise<string> {
+    const json = JSON.stringify(this.sortObject(content));
 
     if (globalThis.crypto?.subtle) {
       const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
@@ -915,6 +1008,141 @@ export class LocalStorageAdapter implements ApiAdapter {
     return nextMetadata;
   }
 
+  async saveSchemaDraft(id: string, input: SaveSchemaDraftInput): Promise<SaveSchemaDraftResult> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const schemaIndex = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (schemaIndex < 0) {
+      throw this.notFound('Schema', id);
+    }
+
+    const content = input.content ?? schemas[schemaIndex].detail.content;
+    const nextHash = await this.computeStableHash(content);
+    const revisions = this.readArray<StoredSchemaDraftRevision>(this.schemaDraftRevisionKey(id))
+      .sort((a, b) => b.revision - a.revision);
+    const latest = revisions[0];
+
+    if (input.expectedRevision !== undefined && input.expectedRevision !== (latest?.revision ?? 0)) {
+      throw {
+        message: `Schema draft revision conflict for schema '${id}': expected ${input.expectedRevision}, actual ${latest?.revision ?? 0}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    if (latest && latest.contentHash === nextHash) {
+      return {
+        noChange: true,
+        revision: latest.revision,
+        draft: latest,
+      };
+    }
+
+    const nextRevision = (latest?.revision ?? 0) + 1;
+    const now = this.nowIso();
+    const currentVersions = this.readArray<StoredSchemaVersionEntry>(this.schemaVersionKey(id))
+      .sort((a, b) => b.version - a.version);
+    const basedOnVersion = currentVersions[0]?.version ?? null;
+
+    const nextDraft: StoredSchemaDraftRevision = {
+      schemaId: id,
+      revision: nextRevision,
+      basedOnVersion,
+      contentHash: nextHash,
+      savedAt: now,
+      savedBy: 'local-user',
+    };
+
+    this.writeArray(this.schemaDraftRevisionKey(id), [...revisions, nextDraft]);
+
+    const nextMetadata: SchemaMetadata = {
+      ...normalizeSchemaMetadataForRead(schemas[schemaIndex].metadata),
+      updatedAt: now,
+      updatedBy: 'local-user',
+    };
+
+    schemas[schemaIndex] = {
+      ...schemas[schemaIndex],
+      metadata: nextMetadata,
+      detail: {
+        ...schemas[schemaIndex].detail,
+        metadata: nextMetadata,
+        content,
+      },
+    };
+    this.writeArray(STORAGE_KEYS.schemas, schemas);
+
+    return {
+      noChange: false,
+      revision: nextRevision,
+      draft: nextDraft,
+    };
+  }
+
+  async listSchemaDraftRevisions(id: string): Promise<SchemaDraftRevision[]> {
+    const revisions = this.readArray<StoredSchemaDraftRevision>(this.schemaDraftRevisionKey(id))
+      .sort((a, b) => b.revision - a.revision);
+
+    return revisions;
+  }
+
+  async createSchemaVersion(id: string, input: CreateSchemaVersionInput): Promise<CreateSchemaVersionResult> {
+    const revisions = this.readArray<StoredSchemaDraftRevision>(this.schemaDraftRevisionKey(id))
+      .sort((a, b) => b.revision - a.revision);
+    const draft = revisions[0];
+    if (!draft) {
+      throw this.notFound('Schema draft', id);
+    }
+
+    if (draft.revision !== input.expectedDraftRevision) {
+      throw {
+        message: `Schema draft revision conflict for schema '${id}': expected ${input.expectedDraftRevision}, actual ${draft.revision}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const versions = this.readArray<StoredSchemaVersionEntry>(this.schemaVersionKey(id))
+      .sort((a, b) => b.version - a.version);
+    const latest = versions[0];
+
+    if (latest && latest.contentHash === draft.contentHash) {
+      return {
+        noChange: true,
+      };
+    }
+
+    const nextVersion = (latest?.version ?? 0) + 1;
+    const createdAt = this.nowIso();
+    const next: StoredSchemaVersionEntry = {
+      schemaId: id,
+      version: nextVersion,
+      schemaVersionId: crypto.randomUUID(),
+      draftRevision: draft.revision,
+      basedOnVersion: draft.basedOnVersion,
+      contentHash: draft.contentHash,
+      versionStatus: 'ready',
+      indexStatus: 'pending',
+      impactStatus: 'pending',
+      sampleValidationStatus: 'pending',
+      createdAt,
+      createdBy: 'local-user',
+    };
+
+    this.writeArray(this.schemaVersionKey(id), [...versions, next]);
+
+    return {
+      noChange: false,
+      version: next,
+    };
+  }
+
+  async listSchemaVersions(id: string): Promise<SchemaVersionEntry[]> {
+    return this.readArray<StoredSchemaVersionEntry>(this.schemaVersionKey(id))
+      .sort((a, b) => b.version - a.version);
+  }
+
   async markSchemaReviewed(id: string): Promise<SchemaMetadata> {
     return this.updateSchema(id, {
       status: 'ready',
@@ -996,6 +1224,102 @@ export class LocalStorageAdapter implements ApiAdapter {
       mode: input.applySuggestedUpdates ? 'apply_all' : 'save_only',
       metadata: mergedMetadata,
     };
+  }
+
+  async updateSchemaSample(id: string, sampleId: string, input: UpdateSchemaSampleInput): Promise<SchemaMetadata> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const index = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (index < 0) {
+      throw this.notFound('Schema', id);
+    }
+
+    const current = schemas[index];
+    const samples = [...(current.metadata.samplePayloads ?? [])];
+    const sampleIndex = samples.findIndex((sample) => sample.sampleId === sampleId);
+    if (sampleIndex < 0) {
+      throw this.notFound('Schema sample', `${id}:${sampleId}`);
+    }
+
+    const dataFormat = current.metadata.dataFormat ?? 'json';
+    const name = typeof input.sampleName === 'string' && input.sampleName.trim().length > 0
+      ? input.sampleName.trim()
+      : samples[sampleIndex]?.name;
+
+    samples[sampleIndex] = {
+      ...samples[sampleIndex]!,
+      name,
+    };
+
+    const raw = dataFormat === 'xml'
+      ? (typeof input.sampleContent === 'string' ? input.sampleContent : String(input.sampleContent))
+      : JSON.stringify(input.sampleContent);
+    const parsed = dataFormat === 'xml' ? null : input.sampleContent;
+
+    const nextMetadata: SchemaMetadata = {
+      ...normalizeSchemaMetadataForRead(current.metadata),
+      samplePayloads: samples,
+      samplePayloadCount: samples.length,
+      updatedAt: this.nowIso(),
+      updatedBy: 'local-user',
+    };
+
+    schemas[index] = {
+      ...current,
+      metadata: nextMetadata,
+      detail: {
+        ...current.detail,
+        metadata: nextMetadata,
+      },
+      samplePayloadContentById: {
+        ...(current.samplePayloadContentById ?? {}),
+        [sampleId]: {
+          sampleId,
+          schemaId: id,
+          dataFormat,
+          raw,
+          parsed,
+        },
+      },
+    };
+
+    this.writeArray(STORAGE_KEYS.schemas, schemas);
+    return nextMetadata;
+  }
+
+  async setDefaultSchemaSample(id: string, input: SetDefaultSchemaSampleInput): Promise<SchemaMetadata> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const index = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (index < 0) {
+      throw this.notFound('Schema', id);
+    }
+
+    const current = schemas[index];
+    const selected = input.sampleId;
+    if (selected !== null) {
+      const exists = (current.metadata.samplePayloads ?? []).some((sample) => sample.sampleId === selected);
+      if (!exists) {
+        throw this.notFound('Schema sample', `${id}:${selected}`);
+      }
+    }
+
+    const nextMetadata: SchemaMetadata = {
+      ...normalizeSchemaMetadataForRead(current.metadata),
+      ...(selected === null ? { defaultSampleId: undefined } : { defaultSampleId: selected }),
+      updatedAt: this.nowIso(),
+      updatedBy: 'local-user',
+    };
+
+    schemas[index] = {
+      ...current,
+      metadata: nextMetadata,
+      detail: {
+        ...current.detail,
+        metadata: nextMetadata,
+      },
+    };
+    this.writeArray(STORAGE_KEYS.schemas, schemas);
+
+    return nextMetadata;
   }
 
   async deleteSchemaSample(id: string, sampleId: string): Promise<SchemaMetadata> {
@@ -1536,6 +1860,173 @@ export class LocalStorageAdapter implements ApiAdapter {
     return importLocalMappingsToBackend(this, projectId);
   }
 
+  async previewSchemaUpgrade(
+    mappingId: string,
+    input: MappingSchemaUpgradePreviewInput,
+  ): Promise<MappingSchemaUpgradePreviewResult> {
+    const mapping = await this.getMapping(mappingId);
+    const impact = {
+      role: input.role,
+      breakingCount: 0,
+      nonBreakingCount: 0,
+      affectedRules: [],
+    } as const;
+
+    const from = input.role === 'source'
+      ? (mapping.sourceSchemaRef ?? input.destination)
+      : input.role === 'target'
+        ? (mapping.targetSchemaRef ?? input.destination)
+        : (mapping.enrichmentSources?.find((entry) => entry.alias === input.enrichmentAlias) ?? input.destination);
+
+    const previewPayload = {
+      mappingId,
+      role: input.role,
+      enrichmentAlias: input.enrichmentAlias,
+      destination: input.destination,
+      expectedMappingRevision: input.expectedMappingRevision,
+      suggestionIds: [] as string[],
+    };
+
+    return {
+      previewId: encodePreviewPayload(previewPayload),
+      mappingId,
+      baseMappingRevision: input.expectedMappingRevision,
+      role: input.role,
+      ...(input.enrichmentAlias ? { enrichmentAlias: input.enrichmentAlias } : {}),
+      from: {
+        schemaId: from.schemaId ?? input.destination.schemaId,
+        schemaVersion: from.schemaVersion ?? input.destination.schemaVersion,
+        schemaVersionId: from.schemaVersionId ?? input.destination.schemaVersionId,
+        contentHash: from.contentHash ?? input.destination.contentHash,
+      },
+      to: input.destination,
+      impact,
+      diff: {
+        added: [],
+        removed: [],
+        renamed: [],
+        moved: [],
+      },
+      suggestions: [],
+      warnings: [],
+    };
+  }
+
+  async applySchemaUpgrade(
+    mappingId: string,
+    input: MappingSchemaUpgradeApplyInput,
+  ): Promise<MappingSchemaUpgradeApplyResult> {
+    if (!input.confirm) {
+      throw {
+        message: 'Schema upgrade apply requires explicit confirm=true',
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    const preview = decodePreviewPayload<{
+      mappingId: string;
+      role: 'source' | 'target' | 'enrichment';
+      enrichmentAlias?: string;
+      destination: {
+        schemaId: string;
+        schemaVersion: number;
+        schemaVersionId: string;
+        contentHash: string;
+      };
+      expectedMappingRevision: number;
+      suggestionIds: string[];
+    }>(input.previewId);
+
+    if (!preview || preview.mappingId !== mappingId) {
+      throw {
+        message: 'Invalid previewId',
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    const config = await this.getMapping(mappingId);
+    if (config.version !== input.expectedMappingRevision || config.version !== preview.expectedMappingRevision) {
+      throw {
+        message: `Preview invalid: mapping revision changed from ${preview.expectedMappingRevision} to ${config.version}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const accepted = [...new Set(input.acceptedSuggestions)].sort();
+    const expected = [...new Set(preview.suggestionIds)].sort();
+    if (accepted.length !== expected.length || accepted.some((entry, index) => entry !== expected[index])) {
+      throw {
+        message: 'Preview invalid: acceptedSuggestions must exactly match preview suggestion set',
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const upgradedByRole = (() => {
+      if (preview.role === 'source') {
+        return {
+          ...config,
+          sourceSchemaRef: {
+            ...(config.sourceSchemaRef ?? { schemaId: preview.destination.schemaId, type: 'local' as const }),
+            schemaId: preview.destination.schemaId,
+            schemaVersion: preview.destination.schemaVersion,
+            schemaVersionId: preview.destination.schemaVersionId,
+            contentHash: preview.destination.contentHash,
+          },
+        } satisfies MappingConfig;
+      }
+
+      if (preview.role === 'target') {
+        return {
+          ...config,
+          targetSchemaRef: {
+            ...(config.targetSchemaRef ?? { schemaId: preview.destination.schemaId, type: 'local' as const }),
+            schemaId: preview.destination.schemaId,
+            schemaVersion: preview.destination.schemaVersion,
+            schemaVersionId: preview.destination.schemaVersionId,
+            contentHash: preview.destination.contentHash,
+          },
+        } satisfies MappingConfig;
+      }
+
+      return {
+        ...config,
+        enrichmentSources: (config.enrichmentSources ?? []).map((entry) =>
+          entry.alias === preview.enrichmentAlias
+            ? {
+              ...entry,
+              schemaId: preview.destination.schemaId,
+              schemaVersion: preview.destination.schemaVersion,
+              schemaVersionId: preview.destination.schemaVersionId,
+              contentHash: preview.destination.contentHash,
+            }
+            : entry),
+      } satisfies MappingConfig;
+    })();
+
+    const updated: MappingConfig = {
+      ...upgradedByRole,
+      version: config.version + 1,
+    };
+
+    const saveResult = await this.saveMapping(mappingId, updated);
+
+    return {
+      mappingId,
+      revision: saveResult.revision,
+      upgradedRole: preview.role,
+      upgradedTo: preview.destination,
+      noChange: false,
+    };
+  }
+
   // Projects
   private normalizeProject(project: Project): Project {
     const schemaRefs = project.schemaRefs ?? [];
@@ -1972,7 +2463,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     throw this.offlineModeError();
   }
 
-  async publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void> {
+  async publishSchemaToGitHub(schemaId: string, input: { repo: string; branch: string; path: string; commitMessage?: string }): Promise<void> {
     void schemaId;
     void input;
     throw this.offlineModeError();

@@ -11,6 +11,7 @@ import { useSchemaEditor } from '../hooks/use-schema-editor';
 import { useSchemaUsage, type UsageMapping } from '../hooks/use-schema-usage';
 
 import { Button } from '@/components/Button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { InlineEditableText } from '@/components/InlineEditableText';
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { getTypeBadge } from '@/features/mappings/lib/source-field-display';
@@ -64,6 +65,38 @@ function dataFormatLabel(metadata: SchemaMetadata): string {
   if (metadata.dataFormat === 'xml') return 'XML';
   if (metadata.dataFormat === 'json') return 'JSON';
   return metadata.format === 'xsd' ? 'XML' : 'JSON';
+}
+
+function isSchemaArchived(metadata: SchemaMetadata): boolean {
+  const candidate = metadata as SchemaMetadata & {
+    archived?: boolean;
+    isArchived?: boolean;
+    archivedAt?: string | null;
+  };
+
+  return candidate.archived === true || candidate.isArchived === true || Boolean(candidate.archivedAt);
+}
+
+function applySchemaSampleMetadata(
+  metadata: SchemaMetadata,
+  incoming?: Partial<SchemaMetadata> | null,
+): SchemaMetadata {
+  if (!incoming) {
+    return metadata;
+  }
+
+  const nextSamplePayloads = incoming.samplePayloads ?? metadata.samplePayloads;
+  const nextSamplePayloadCount = incoming.samplePayloadCount
+    ?? nextSamplePayloads?.length
+    ?? metadata.samplePayloadCount;
+
+  return {
+    ...metadata,
+    ...incoming,
+    samplePayloads: nextSamplePayloads,
+    samplePayloadCount: nextSamplePayloadCount,
+    defaultSampleId: incoming.defaultSampleId ?? metadata.defaultSampleId,
+  };
 }
 
 function roleLabel(role: UsageMapping['role']): string {
@@ -597,7 +630,11 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
     setParsedSchema,
     addSample,
     deleteSample,
+    setDefaultSample,
     getSamplePayload,
+    draftRevisions,
+    schemaVersions,
+    createVersion,
   } = useSchemaDetail(schemaId);
 
   const detailRefreshMeta = !isLoading && !error && !notFound ? (
@@ -613,7 +650,7 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
     [setParsedSchema],
   );
 
-  const { saveFieldEdits } =
+  const { saveFieldEdits, addFieldWithValidation } =
     useSchemaEditor(
       parsedSchema,
       schemaId,
@@ -628,12 +665,26 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
   const [showViewRaw, setShowViewRaw] = useState(false);
   const [showUsageModal, setShowUsageModal] = useState(false);
   const [selectedSamplePayload, setSelectedSamplePayload] = useState<unknown | null>(null);
+  const [createVersionError, setCreateVersionError] = useState<string | null>(null);
+  const [isCreatingVersion, setIsCreatingVersion] = useState(false);
+  const [selectedVersionNumber, setSelectedVersionNumber] = useState<number | null>(null);
+  const [addFieldDialogOpen, setAddFieldDialogOpen] = useState(false);
+  const [addFieldName, setAddFieldName] = useState('');
+  const [addFieldType, setAddFieldType] = useState<SchemaTreeNode['type']>('string');
+  const [addFieldError, setAddFieldError] = useState<string | null>(null);
+  const [addFieldParentPath, setAddFieldParentPath] = useState<string | null>(null);
+  const [showXsdEditUnavailable, setShowXsdEditUnavailable] = useState(false);
+  const [sampleMetadataOverrides, setSampleMetadataOverrides] = useState<Partial<SchemaMetadata> | null>(null);
   const treeRef = useRef<{ scrollToNode: (path: string) => boolean } | null>(null);
 
   const breadcrumbLabel = schema?.metadata.name ?? (isLoading ? 'Loading...' : schemaId);
   useBreadcrumbLabel(schemaId, breadcrumbLabel);
 
   const currentTree = parsedSchema;
+  const effectiveMetadata = useMemo(
+    () => (schema ? applySchemaSampleMetadata(schema.metadata, sampleMetadataOverrides) : null),
+    [schema, sampleMetadataOverrides],
+  );
 
   const allTreeNodes = useMemo(() => {
     const source = currentTree?.nodes ?? [];
@@ -665,6 +716,12 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
 
   const sampleValueByPath = useMemo(() => toSampleValueByPath(selectedSamplePayload), [selectedSamplePayload]);
   const selectedFieldSampleValue = selectedNode?.path ? sampleValueByPath.get(selectedNode.path) : undefined;
+  const latestDraftRevision = draftRevisions.reduce((max, entry) => Math.max(max, entry.revision), 0);
+  const latestVersion = schemaVersions.reduce((max, entry) => Math.max(max, entry.version), 0);
+  const activeVersion = selectedVersionNumber == null
+    ? null
+    : schemaVersions.find((entry) => entry.version === selectedVersionNumber) ?? null;
+  const archivedFamily = effectiveMetadata ? isSchemaArchived(effectiveMetadata) : false;
 
   if (isLoading) {
     return (
@@ -690,13 +747,61 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
     );
   }
 
-  const { metadata } = schema;
+  const metadata = effectiveMetadata ?? schema.metadata;
   const isCdm = metadata.origin === 'cdm' || metadata.ownership === 'cdm' || metadata.readonly;
   const canFieldEdit = !isCdm && metadata.format === 'json-schema';
   const coercedHeaderStatus = metadata.status === 'needs_review'
     ? 'ready'
     : metadata.status;
   const headerMetadata: SchemaMetadata = { ...metadata, status: coercedHeaderStatus };
+
+  const immutableVersionView = activeVersion != null;
+
+  async function handleCreateVersion() {
+    if (latestDraftRevision <= 0) {
+      setCreateVersionError('No saved draft revision available. Save draft before creating a version.');
+      return;
+    }
+
+    setCreateVersionError(null);
+    setIsCreatingVersion(true);
+    try {
+      await createVersion(latestDraftRevision);
+    } catch (err) {
+      setCreateVersionError(err instanceof Error ? err.message : 'Failed to create version.');
+    } finally {
+      setIsCreatingVersion(false);
+    }
+  }
+
+  async function handleSubmitAddField() {
+    const trimmed = addFieldName.trim();
+    if (!trimmed) {
+      setAddFieldError('Field name is required.');
+      return;
+    }
+
+    if (trimmed.toLowerCase() === 'newfield') {
+      setAddFieldError('Please choose a specific field name instead of newField.');
+      return;
+    }
+
+    setAddFieldError(null);
+
+    try {
+      await addFieldWithValidation({
+        parentPath: addFieldParentPath,
+        fieldName: trimmed,
+        type: addFieldType,
+      });
+      setAddFieldDialogOpen(false);
+      setAddFieldName('');
+      setAddFieldType('string');
+      setAddFieldParentPath(null);
+    } catch (err) {
+      setAddFieldError(err instanceof Error ? err.message : 'Failed to add field.');
+    }
+  }
 
   return (
     <div
@@ -727,6 +832,129 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
 
       {detailRefreshMeta}
 
+      {archivedFamily ? (
+        <div
+          data-testid="schema-archived-warning"
+          className="rounded-md border border-amber-700/70 bg-amber-950/40 px-3 py-2 text-xs text-amber-200"
+          role="status"
+        >
+          This schema family is archived. Existing mappings pinned to its versions remain editable, validatable, and deployable with warning. New mappings do not select archived families by default.
+        </div>
+      ) : null}
+
+      {metadata.format === 'xsd' ? (
+        <div
+          data-testid="xsd-edit-unavailable-message"
+          className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-300"
+          role="status"
+        >
+          Structural editing is unavailable for XSD schemas in this phase. Use View raw to inspect and upload/replace to revise source content.
+        </div>
+      ) : null}
+
+      <section className="rounded-md border border-slate-800 bg-slate-900/50 p-3" data-testid="schema-version-controls">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-slate-500">Version</span>
+          <select
+            data-testid="schema-version-select"
+            aria-label="Select schema version"
+            value={selectedVersionNumber == null ? 'draft' : String(selectedVersionNumber)}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === 'draft') {
+                setSelectedVersionNumber(null);
+              } else {
+                setSelectedVersionNumber(Number(value));
+              }
+            }}
+            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          >
+            <option value="draft">Draft (r{latestDraftRevision || 0})</option>
+            {schemaVersions.map((entry) => (
+              <option key={entry.schemaVersionId} value={entry.version}>
+                v{entry.version} · {entry.versionStatus}
+              </option>
+            ))}
+          </select>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="schema-create-version-button"
+            onClick={() => void handleCreateVersion()}
+            disabled={isCreatingVersion}
+          >
+            {isCreatingVersion ? 'Creating…' : 'Create version'}
+          </Button>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="schema-version-duplicate-button"
+            onClick={() => setSelectedVersionNumber(null)}
+          >
+            Duplicate to draft
+          </Button>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="schema-version-restore-button"
+            onClick={() => setSelectedVersionNumber(null)}
+            disabled={activeVersion == null}
+          >
+            Restore to draft
+          </Button>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="schema-version-view-history-button"
+          >
+            View history
+          </Button>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="schema-version-compare-button"
+            disabled={schemaVersions.length < 2}
+          >
+            Compare
+          </Button>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="schema-version-download-button"
+          >
+            Download
+          </Button>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="schema-version-deprecate-button"
+            disabled={activeVersion == null}
+          >
+            Deprecate
+          </Button>
+        </div>
+
+        <p className="mt-2 text-xs text-slate-400" data-testid="schema-draft-indicator">
+          {immutableVersionView
+            ? `Viewing immutable v${activeVersion.version}. Direct edits are disabled; restore or duplicate to draft to make changes.`
+            : latestVersion > 0
+              ? `Draft based on v${latestVersion}. Save draft revisions independently, then create version when ready.`
+              : 'Draft-only schema. Save draft revisions, then create v1 to make it mapping-selectable.'}
+        </p>
+        {createVersionError ? (
+          <p className="mt-1 text-xs text-rose-300" data-testid="schema-create-version-error" role="alert">
+            {createVersionError}
+          </p>
+        ) : null}
+      </section>
+
       <div
         data-testid="schema-detail-layout-grid"
         className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-stretch"
@@ -747,6 +975,22 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
 
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Fields</h2>
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="add-field-dialog-trigger"
+              onClick={() => {
+                if (metadata.format === 'xsd') {
+                  setShowXsdEditUnavailable(true);
+                  return;
+                }
+                setAddFieldParentPath(selectedNode?.path ?? null);
+                setAddFieldDialogOpen(true);
+              }}
+              disabled={immutableVersionView}
+            >
+              Add field
+            </Button>
           </div>
 
           {currentTree ? (
@@ -778,7 +1022,7 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
         >
           <FieldDetailsEditorSection
             selectedNode={selectedNode}
-            editable={canFieldEdit}
+            editable={canFieldEdit && !immutableVersionView}
             sampleValue={selectedFieldSampleValue}
             onSave={(updates) => {
               if (!selectedNode) return;
@@ -790,11 +1034,43 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
             <SchemaSamplePayloadsSection
               metadata={metadata}
               initialSamplePayload={typeof schema.content === 'string' ? schema.content : schema.content}
-              onAddSample={addSample}
-              onDeleteSample={deleteSample}
-              onLoadSamplePayload={getSamplePayload}
-              onSelectedSamplePayloadChange={(_sampleId, payload) => {
-                setSelectedSamplePayload(payload);
+              onAddSample={async (input) => {
+                const result = await addSample(input);
+                setSampleMetadataOverrides((current) => ({
+                  ...(current ?? {}),
+                  samplePayloads: result.metadata.samplePayloads ?? [
+                    ...((metadata.samplePayloads ?? [])),
+                    result.sample,
+                  ],
+                  samplePayloadCount: result.metadata.samplePayloadCount
+                    ?? ((metadata.samplePayloads ?? []).length + 1),
+                  defaultSampleId: result.metadata.defaultSampleId ?? metadata.defaultSampleId,
+                }));
+                return result;
+              }}
+              onDeleteSample={async (sampleId) => {
+                await deleteSample(sampleId);
+                const nextSamples = (metadata.samplePayloads ?? []).filter((sample) => sample.sampleId !== sampleId);
+              setSampleMetadataOverrides((current) => ({
+                ...(current ?? {}),
+                samplePayloads: nextSamples,
+                samplePayloadCount: nextSamples.length,
+                defaultSampleId: metadata.defaultSampleId === sampleId
+                  ? nextSamples[0]?.sampleId
+                  : metadata.defaultSampleId,
+              }));
+            }}
+            onSetDefaultSample={async (sampleId) => {
+              await setDefaultSample(sampleId);
+              setSampleMetadataOverrides((current) => ({
+                ...(current ?? {}),
+                defaultSampleId: sampleId ?? undefined,
+              }));
+            }}
+            mappingDefaultSampleUsageCount={usageMappings.length}
+            onLoadSamplePayload={getSamplePayload}
+            onSelectedSamplePayloadChange={(_sampleId, payload) => {
+              setSelectedSamplePayload(payload);
               }}
             />
           </section>
@@ -813,6 +1089,80 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
         content={schema.content}
         format={metadata.format}
       />
+
+      <ConfirmDialog
+        open={showXsdEditUnavailable}
+        title="XSD structural editing unavailable"
+        message="Structural edit operations for XSD are unavailable in this phase. Use View raw to inspect and upload/replace the source document to revise structure."
+        confirmLabel="Got it"
+        cancelLabel="Close"
+        onConfirm={() => setShowXsdEditUnavailable(false)}
+        onCancel={() => setShowXsdEditUnavailable(false)}
+      />
+
+      {addFieldDialogOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="presentation" data-testid="add-field-dialog-overlay">
+          <div className="absolute inset-0 bg-black/60" aria-hidden="true" onClick={() => setAddFieldDialogOpen(false)} />
+
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add field"
+            data-testid="add-field-dialog"
+            className="relative z-10 w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-xl"
+          >
+            <h3 className="text-sm font-semibold text-slate-100">Add field</h3>
+            <p className="mt-1 text-xs text-slate-400">
+              Provide required values before insertion. Placeholder fields are not auto-created.
+            </p>
+
+            <label className="mt-3 block text-xs text-slate-300" htmlFor="add-field-name">
+              Field name
+            </label>
+            <input
+              id="add-field-name"
+              data-testid="add-field-name-input"
+              value={addFieldName}
+              onChange={(event) => setAddFieldName(event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100"
+            />
+
+            <label className="mt-3 block text-xs text-slate-300" htmlFor="add-field-type">
+              Type
+            </label>
+            <select
+              id="add-field-type"
+              data-testid="add-field-type-select"
+              value={addFieldType}
+              onChange={(event) => setAddFieldType(event.target.value as SchemaTreeNode['type'])}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100"
+            >
+              <option value="string">string</option>
+              <option value="number">number</option>
+              <option value="boolean">boolean</option>
+              <option value="object">object</option>
+              <option value="array">array</option>
+              <option value="null">null</option>
+              <option value="any">any</option>
+            </select>
+
+            {addFieldError ? (
+              <p className="mt-2 text-xs text-rose-300" data-testid="add-field-error" role="alert">
+                {addFieldError}
+              </p>
+            ) : null}
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <Button size="sm" variant="secondary" data-testid="add-field-cancel" onClick={() => setAddFieldDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" variant="primary" data-testid="add-field-submit" onClick={() => void handleSubmitAddField()}>
+                Add field
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
     </div>
   );

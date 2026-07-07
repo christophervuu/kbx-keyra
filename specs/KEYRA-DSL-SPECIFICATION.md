@@ -972,7 +972,9 @@ Every diagnostic emitted by the engine has this shape:
 
 ### 6.1 Full Config Structure
 
-The mapping config is a versioned JSON document that wraps the rules array with metadata and configuration:
+The mapping config is a versioned JSON document that wraps the rules array with metadata and configuration.
+
+> FS-105 compatibility note: DSL expression grammar is unchanged. The schema-reference contract in mapping config is updated to immutable version pinning (`schemaVersion`, `schemaVersionId`, `contentHash`) instead of `type: local|github` + `commitSha`.
 
 ```json
 {
@@ -981,11 +983,15 @@ The mapping config is a versioned JSON document that wraps the rules array with 
   "engineVersion": "1.0.0",
   "sourceSchemaRef": {
     "schemaId": "practice-source",
-    "type": "local"
+    "schemaVersion": 3,
+    "schemaVersionId": "e2d9d786-61df-4c12-9e09-2b8843cf78c4",
+    "contentHash": "sha256:3f6e..."
   },
   "targetSchemaRef": {
     "schemaId": "practice-target",
-    "type": "local"
+    "schemaVersion": 5,
+    "schemaVersionId": "d12f7e6c-f74a-4a96-a6fb-849fa867e4f5",
+    "contentHash": "sha256:8a2b..."
   },
   "config": {
     "unmappedTargets": "omit",
@@ -1011,8 +1017,8 @@ The mapping config is a versioned JSON document that wraps the rules array with 
 | `name` | string | Yes | Display name for the mapping. |
 | `version` | number | Yes | Auto-incremented integer on each save (v1, v2, v3...). |
 | `engineVersion` | string | Yes | Semver string of the DSL spec version this config was authored against (e.g., `"1.1.0"`). Used for compatibility checks. |
-| `sourceSchemaRef` | object | Yes | Reference to the source schema. Contains `schemaId`, `type` (`"local"`, `"github"`), and optionally `commitSha` for GitHub-linked schemas. |
-| `targetSchemaRef` | object | Yes | Reference to the target schema. Same structure as `sourceSchemaRef`. |
+| `sourceSchemaRef` | object | Yes | Reference to the source schema immutable pin. Contains `schemaId`, `schemaVersion`, `schemaVersionId`, and `contentHash`. |
+| `targetSchemaRef` | object | Yes | Reference to the target schema immutable pin. Same structure as `sourceSchemaRef`. |
 | `config` | object | Yes | Mapping-level configuration. See §6.3. |
 | `rules` | array | Yes | Ordered array of mapping rules. See §6.4. |
 

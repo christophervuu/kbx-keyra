@@ -31,6 +31,9 @@ interface SchemaRef {
   readonly schemaId: string;
   readonly type: 'github' | 'local' | 'published';
   readonly commitSha?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
 }
 
 interface MappingRule {
@@ -102,6 +105,9 @@ interface MappingConfig {
 interface MappingEnrichmentSource {
   readonly alias: string;
   readonly schemaId?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
   readonly required?: boolean;
   readonly description?: string;
 }
@@ -196,17 +202,82 @@ function normalizeCanonicalEnrichmentSources(value: unknown): {
 
     aliases.add(alias);
 
+    const schemaVersion = typeof candidate.schemaVersion === 'number' && Number.isInteger(candidate.schemaVersion)
+      ? candidate.schemaVersion
+      : undefined;
+    const schemaVersionId = typeof candidate.schemaVersionId === 'string' ? candidate.schemaVersionId.trim() : '';
+    const contentHash = typeof candidate.contentHash === 'string' ? candidate.contentHash.trim() : '';
+
+    if (!schemaVersion || !schemaVersionId || !contentHash) {
+      return {
+        ok: false,
+        message: `Invalid enrichmentSources: immutable schema pin required for alias '${alias}' (schemaVersion, schemaVersionId, contentHash)`,
+      };
+    }
+
     const required = typeof candidate.required === 'boolean' ? candidate.required : true;
     const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
     normalized.push({
       alias,
       schemaId,
+      schemaVersion,
+      schemaVersionId,
+      contentHash,
       required,
       ...(description ? { description } : {}),
     });
   }
 
   return { ok: true, value: normalized };
+}
+
+function normalizeSchemaRef(
+  value: unknown,
+  label: 'sourceSchemaRef' | 'targetSchemaRef',
+): { ok: true; value: SchemaRef | undefined } | { ok: false; message: string } {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  if (!value || typeof value !== 'object') {
+    return { ok: false, message: `Invalid ${label}: expected object` };
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const schemaId = typeof candidate.schemaId === 'string' ? candidate.schemaId.trim() : '';
+  const schemaVersion =
+    typeof candidate.schemaVersion === 'number' && Number.isInteger(candidate.schemaVersion)
+      ? candidate.schemaVersion
+      : undefined;
+  const schemaVersionId = typeof candidate.schemaVersionId === 'string' ? candidate.schemaVersionId.trim() : '';
+  const contentHash = typeof candidate.contentHash === 'string' ? candidate.contentHash.trim() : '';
+
+  if (!schemaId || !schemaVersion || !schemaVersionId || !contentHash) {
+    return {
+      ok: false,
+      message: `Invalid ${label}: immutable schema pin required (schemaId, schemaVersion, schemaVersionId, contentHash)`,
+    };
+  }
+
+  const typeValue = candidate.type;
+  const type: SchemaRef['type'] =
+    typeValue === 'github' || typeValue === 'published' || typeValue === 'local'
+      ? typeValue
+      : 'local';
+
+  return {
+    ok: true,
+    value: {
+      schemaId,
+      type,
+      ...(typeof candidate.commitSha === 'string' && candidate.commitSha.trim()
+        ? { commitSha: candidate.commitSha.trim() }
+        : {}),
+      schemaVersion,
+      schemaVersionId,
+      contentHash,
+    },
+  };
 }
 
 function deriveCompatibilityExternals(
@@ -555,12 +626,18 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
     schemaId: config.sourceSchemaRef?.schemaId ?? '',
     type: config.sourceSchemaRef?.type === 'github' ? 'github' : 'local',
     ...(config.sourceSchemaRef?.commitSha ? { commitSha: config.sourceSchemaRef.commitSha } : {}),
+    ...(typeof config.sourceSchemaRef?.schemaVersion === 'number' ? { schemaVersion: config.sourceSchemaRef.schemaVersion } : {}),
+    ...(config.sourceSchemaRef?.schemaVersionId ? { schemaVersionId: config.sourceSchemaRef.schemaVersionId } : {}),
+    ...(config.sourceSchemaRef?.contentHash ? { contentHash: config.sourceSchemaRef.contentHash } : {}),
   };
 
   const targetSchemaRef: EngineSchemaRef = {
     schemaId: config.targetSchemaRef?.schemaId ?? '',
     type: config.targetSchemaRef?.type === 'github' ? 'github' : 'local',
     ...(config.targetSchemaRef?.commitSha ? { commitSha: config.targetSchemaRef.commitSha } : {}),
+    ...(typeof config.targetSchemaRef?.schemaVersion === 'number' ? { schemaVersion: config.targetSchemaRef.schemaVersion } : {}),
+    ...(config.targetSchemaRef?.schemaVersionId ? { schemaVersionId: config.targetSchemaRef.schemaVersionId } : {}),
+    ...(config.targetSchemaRef?.contentHash ? { contentHash: config.targetSchemaRef.contentHash } : {}),
   };
 
   const rules: EngineMappingRule[] = (config.rules ?? []).map((rule) => ({
@@ -692,6 +769,16 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const nextRevision = currentRevision + 1;
     const businessContext = normalizeOptionalBusinessContext(body?.businessContext);
+    const sourceSchemaRefResult = normalizeSchemaRef(body?.sourceSchemaRef, 'sourceSchemaRef');
+    if (!sourceSchemaRefResult.ok) {
+      return errorResponse(ERROR_CODES.VALIDATION_ERROR, sourceSchemaRefResult.message, 400, false);
+    }
+
+    const targetSchemaRefResult = normalizeSchemaRef(body?.targetSchemaRef, 'targetSchemaRef');
+    if (!targetSchemaRefResult.ok) {
+      return errorResponse(ERROR_CODES.VALIDATION_ERROR, targetSchemaRefResult.message, 400, false);
+    }
+
     const canonicalEnrichment = normalizeCanonicalEnrichmentSources(body?.enrichmentSources);
     if (!canonicalEnrichment.ok) {
       return errorResponse(ERROR_CODES.VALIDATION_ERROR, canonicalEnrichment.message, 400, false);
@@ -707,7 +794,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       : derivedEnrichmentSources;
     const externalSources = deriveCompatibilityExternals(enrichmentSources, legacyExternalAliases);
 
-    const targetSchema = await loadTargetSchemaContent((body?.targetSchemaRef as SchemaRef | undefined)?.schemaId ?? existing.targetSchemaId);
+    const targetSchema = await loadTargetSchemaContent(targetSchemaRefResult.value?.schemaId ?? existing.targetSchemaId);
     const incomingRules = Array.isArray(body?.rules) ? (body.rules as MappingRule[]) : [];
     const normalizedRules = normalizeRulesByTargetSchema(incomingRules, targetSchema);
 
@@ -718,8 +805,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ...(businessContext ? { businessContext } : {}),
       version: nextRevision,
       engineVersion: typeof body?.engineVersion === 'string' ? body.engineVersion : '1.0.0',
-      sourceSchemaRef: (body?.sourceSchemaRef as SchemaRef | undefined) ?? undefined,
-      targetSchemaRef: (body?.targetSchemaRef as SchemaRef | undefined) ?? undefined,
+      sourceSchemaRef: sourceSchemaRefResult.value,
+      targetSchemaRef: targetSchemaRefResult.value,
       enrichmentSources,
       config: {
         ...inputConfig,

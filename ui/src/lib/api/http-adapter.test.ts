@@ -91,6 +91,83 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('saveSchemaDraft maps to PUT /schemas/:id/draft with body', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      noChange: false,
+      revision: 2,
+      draft: {
+        schemaId: 's-1',
+        revision: 2,
+        basedOnVersion: 1,
+        contentHash: 'hash-2',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        savedBy: 'system',
+      },
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.saveSchemaDraft('s-1', {
+      content: { type: 'object' },
+      expectedRevision: 1,
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/draft',
+      method: 'PUT',
+      body: {
+        content: { type: 'object' },
+        expectedRevision: 1,
+      },
+    });
+  });
+
+  it('listSchemaDraftRevisions maps to GET /schemas/:id/draft/revisions', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listSchemaDraftRevisions('s-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/draft/revisions',
+      method: 'GET',
+    });
+  });
+
+  it('createSchemaVersion maps to POST /schemas/:id/versions with body', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ noChange: true });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.createSchemaVersion('s-1', {
+      expectedDraftRevision: 2,
+      idempotencyKey: 'idem-1',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/versions',
+      method: 'POST',
+      body: {
+        expectedDraftRevision: 2,
+        idempotencyKey: 'idem-1',
+      },
+    });
+  });
+
+  it('listSchemaVersions maps to GET /schemas/:id/versions', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listSchemaVersions('s-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/versions',
+      method: 'GET',
+    });
+  });
+
   it('deleteSchema maps to DELETE /schemas/:id and handles void', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce(undefined);
     const adapter = new HttpAdapter(API_URL);
@@ -100,6 +177,40 @@ describe('HttpAdapter (CRUD)', () => {
       baseUrl: API_URL,
       path: '/schemas/s-1',
       method: 'DELETE',
+    });
+  });
+
+  it('updateSchemaSample maps to PUT /schemas/:id/samples/:sampleId', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ metadata: { schemaId: 's-1', name: 'Schema A' } });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.updateSchemaSample('s-1', 'sample-1', {
+      sampleName: 'Updated',
+      sampleContent: { foo: 'bar' },
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/samples/sample-1',
+      method: 'PUT',
+      body: {
+        sampleName: 'Updated',
+        sampleContent: { foo: 'bar' },
+      },
+    });
+  });
+
+  it('setDefaultSchemaSample maps to POST /schemas/:id/samples/default', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ metadata: { schemaId: 's-1', name: 'Schema A' } });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.setDefaultSchemaSample('s-1', { sampleId: 'sample-2' });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/samples/default',
+      method: 'POST',
+      body: { sampleId: 'sample-2' },
     });
   });
 
@@ -217,6 +328,93 @@ describe('HttpAdapter (CRUD)', () => {
       path: '/mappings/m-1/duplicate',
       method: 'POST',
       body: { name: 'Duplicated' },
+    });
+  });
+
+  it('previewSchemaUpgrade maps to POST /mappings/:id/schema-upgrade/preview', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      previewId: 'preview-id',
+      mappingId: 'm-1',
+      baseMappingRevision: 4,
+      role: 'source',
+      from: {
+        schemaId: 's-1',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-1',
+        contentHash: 'h1',
+      },
+      to: {
+        schemaId: 's-1',
+        schemaVersion: 2,
+        schemaVersionId: 'sv-2',
+        contentHash: 'h2',
+      },
+      impact: { role: 'source', breakingCount: 0, nonBreakingCount: 0, affectedRules: [] },
+      diff: { added: [], removed: [], renamed: [], moved: [] },
+      suggestions: [],
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.previewSchemaUpgrade('m-1', {
+      expectedMappingRevision: 4,
+      role: 'source',
+      destination: {
+        schemaId: 's-1',
+        schemaVersion: 2,
+        schemaVersionId: 'sv-2',
+        contentHash: 'h2',
+      },
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/schema-upgrade/preview',
+      method: 'POST',
+      body: {
+        expectedMappingRevision: 4,
+        role: 'source',
+        destination: {
+          schemaId: 's-1',
+          schemaVersion: 2,
+          schemaVersionId: 'sv-2',
+          contentHash: 'h2',
+        },
+      },
+    });
+  });
+
+  it('applySchemaUpgrade maps to POST /mappings/:id/schema-upgrade/apply', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      mappingId: 'm-1',
+      revision: 5,
+      upgradedRole: 'source',
+      upgradedTo: {
+        schemaId: 's-1',
+        schemaVersion: 2,
+        schemaVersionId: 'sv-2',
+        contentHash: 'h2',
+      },
+      noChange: false,
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.applySchemaUpgrade('m-1', {
+      expectedMappingRevision: 4,
+      previewId: 'preview-id',
+      acceptedSuggestions: [],
+      confirm: true,
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/schema-upgrade/apply',
+      method: 'POST',
+      body: {
+        expectedMappingRevision: 4,
+        previewId: 'preview-id',
+        acceptedSuggestions: [],
+        confirm: true,
+      },
     });
   });
 

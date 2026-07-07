@@ -709,3 +709,80 @@ For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_END
 - HttpAdapter (client): FS-055
 - Phase 1 readiness baseline: `forge/architecture/phase-1-readiness.md`
 - Project structure: `forge/architecture/project-structure.md`
+
+---
+
+## 11) FS-105 schema lifecycle and immutable-version persistence addendum
+
+FS-105 formalizes schema-family persistence semantics beyond existing schema metadata/sync contracts.
+
+### 11.1 Canonical schema-family lifecycle persistence
+
+Schema persistence is modeled as family + active draft + immutable versions:
+
+- one active mutable draft per schema family,
+- draft revisions created only on canonical content change,
+- immutable versions created explicitly and never edited in place,
+- draft `basedOnVersion` linkage maintained after successful version creation.
+
+### 11.2 Identity and hash model
+
+Version persistence requires distinct identity surfaces:
+
+- `schemaVersionId` — UUID immutable identity,
+- `(schemaId, version)` — monotonic numeric sequence key,
+- `contentHash` — deterministic SHA-256 over canonical content representation.
+
+No-op create-version requests (`contentHash` equals latest immutable version) do not allocate a new version number.
+
+### 11.3 Status separation for immutable versions
+
+Persistence model must keep independent status tracks:
+
+- `versionStatus`: `creating | ready | failed | deprecated`
+- `indexStatus`: `pending | ready | failed`
+- `impactStatus`: `pending | ready | failed`
+- `sampleValidationStatus`: `pending | ready | failed`
+
+A committed immutable version remains usable when downstream indexing/impact/sample-validation fails.
+
+### 11.4 Mapping schema reference persistence contract
+
+Mapping persistence stores immutable schema pins for source/target/enrichment refs:
+
+- `schemaId`
+- `schemaVersion`
+- `schemaVersionId`
+- `contentHash`
+
+Mappings never resolve against mutable/latest schema at runtime.
+
+### 11.5 Stable field identity sidecar
+
+FS-105 adds a schema-node identity sidecar model for diff/impact fidelity:
+
+- `fieldId` identity is stable across rename/move/type/required/description updates,
+- duplicate and delete-readd generate new IDs,
+- sidecar identity is stored independently of user raw schema content unless explicitly configured otherwise.
+
+### 11.6 Sample lifecycle persistence
+
+Samples are schema-family metadata artifacts (not schema-version artifacts):
+
+- add/update/delete/default sample changes do not create immutable schema versions,
+- compatibility recalculation is bounded (eager for latest + actively pinned versions; lazy for unreferenced historical versions),
+- mapping sample preference fallback obeys deterministic precedence rules.
+
+### 11.7 Migration coverage requirements
+
+FS-105 migration/backfill persistence scope includes historical artifacts:
+
+- schema families/versions,
+- active mappings,
+- retained mapping revisions,
+- immutable mapping versions,
+- deployment snapshots,
+- enrichment references and archived legacy references.
+
+Migration must be idempotent, restartable, dry-run capable, and parity-verifiable before destructive cleanup.
+

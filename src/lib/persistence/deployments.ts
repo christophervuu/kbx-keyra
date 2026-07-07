@@ -2,7 +2,13 @@ import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
 import { computeConfigHash } from './hash.js';
 import { dynamoClient } from './clients.js';
-import { RUNTIME_TABLE_NAMES, TABLE_NAMES, deploymentCurrentKey, deploymentHistorySortKey } from './config.js';
+import {
+  RUNTIME_TABLE_NAMES,
+  TABLE_NAMES,
+  deploymentCurrentKey,
+  deploymentHistorySortKey,
+  schemaVersionContentKey,
+} from './config.js';
 import { put as putDeploymentSnapshot } from './s3/deployment-snapshot.js';
 import type {
   ActiveSnapshotItem,
@@ -10,6 +16,7 @@ import type {
   DeploymentHistoryItem,
   CreateRollbackDeploymentInput,
   CreateDeploymentInput,
+  DeployedSchemaArtifactRef,
   DeploymentCurrentItem,
   DeploymentEnvironment,
   DeploymentItem,
@@ -66,6 +73,78 @@ function toDeploymentCurrentItem(item: DeploymentItem): DeploymentCurrentItem {
   };
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+function normalizeSchemaRefsFromConfig(config: CreateDeploymentInput['config']): readonly DeployedSchemaArtifactRef[] {
+  const refs: DeployedSchemaArtifactRef[] = [];
+
+  const sourceRef = config.sourceSchemaRef;
+  if (
+    sourceRef
+    && isNonEmptyString(sourceRef.schemaId)
+    && isPositiveInteger(sourceRef.schemaVersion)
+    && isNonEmptyString(sourceRef.schemaVersionId)
+    && isNonEmptyString(sourceRef.contentHash)
+  ) {
+    refs.push({
+      role: 'source',
+      schemaId: sourceRef.schemaId,
+      schemaVersion: sourceRef.schemaVersion,
+      schemaVersionId: sourceRef.schemaVersionId,
+      contentHash: sourceRef.contentHash,
+      contentS3Key: schemaVersionContentKey(sourceRef.schemaId, sourceRef.schemaVersion),
+    });
+  }
+
+  const targetRef = config.targetSchemaRef;
+  if (
+    targetRef
+    && isNonEmptyString(targetRef.schemaId)
+    && isPositiveInteger(targetRef.schemaVersion)
+    && isNonEmptyString(targetRef.schemaVersionId)
+    && isNonEmptyString(targetRef.contentHash)
+  ) {
+    refs.push({
+      role: 'target',
+      schemaId: targetRef.schemaId,
+      schemaVersion: targetRef.schemaVersion,
+      schemaVersionId: targetRef.schemaVersionId,
+      contentHash: targetRef.contentHash,
+      contentS3Key: schemaVersionContentKey(targetRef.schemaId, targetRef.schemaVersion),
+    });
+  }
+
+  const enrichments = Array.isArray(config.enrichmentSources) ? config.enrichmentSources : [];
+  for (const enrichment of enrichments) {
+    if (
+      !isNonEmptyString(enrichment.schemaId)
+      || !isPositiveInteger(enrichment.schemaVersion)
+      || !isNonEmptyString(enrichment.schemaVersionId)
+      || !isNonEmptyString(enrichment.contentHash)
+    ) {
+      continue;
+    }
+
+    refs.push({
+      role: 'enrichment',
+      schemaId: enrichment.schemaId,
+      schemaVersion: enrichment.schemaVersion,
+      schemaVersionId: enrichment.schemaVersionId,
+      contentHash: enrichment.contentHash,
+      contentS3Key: schemaVersionContentKey(enrichment.schemaId, enrichment.schemaVersion),
+      ...(isNonEmptyString(enrichment.alias) ? { alias: enrichment.alias } : {}),
+    });
+  }
+
+  return refs;
+}
+
 export async function create(input: CreateDeploymentInput): Promise<DeploymentItem> {
   const deployedAt = nowIso();
   const configHash = await computeConfigHash(input.config);
@@ -77,6 +156,7 @@ export async function create(input: CreateDeploymentInput): Promise<DeploymentIt
   }
 
   const snapshotMetadata = {
+    schemaRefs: normalizeSchemaRefsFromConfig(input.config),
     ...(input.cdmSchemaTraceability ? { cdmSchemaTraceability: input.cdmSchemaTraceability } : {}),
   };
   const configS3Key = await putDeploymentSnapshot(input.mappingId, input.environment, deployedAt, input.config, snapshotMetadata);

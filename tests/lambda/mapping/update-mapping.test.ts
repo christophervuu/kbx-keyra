@@ -143,7 +143,13 @@ describe('update-mapping handler', () => {
       name: 'Invoice Map Updated',
       expectedRevision: 1,
       engineVersion: '1.0.0',
-      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      targetSchemaRef: {
+        schemaId: 'schema-1',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-target-1',
+        contentHash: 'hash-target-1',
+      },
       config: {},
       rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
     });
@@ -186,7 +192,13 @@ describe('update-mapping handler', () => {
       name: 'Invoice Map Updated',
       expectedRevision: 1,
       engineVersion: '1.0.0',
-      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      targetSchemaRef: {
+        schemaId: 'schema-1',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-target-1',
+        contentHash: 'hash-target-1',
+      },
       config: {},
       rules: [{ target: 'financial.totalAmount', type: 'number', expression: 'cast(source("payment.total"), "number")' }],
     });
@@ -243,7 +255,13 @@ describe('update-mapping handler', () => {
       name: 'Invoice Map Updated',
       expectedRevision: 1,
       engineVersion: '1.0.0',
-      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      targetSchemaRef: {
+        schemaId: 'schema-1',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-target-1',
+        contentHash: 'hash-target-1',
+      },
       config: {},
       rules: [
         { target: 'financial.totalAmount', type: 'string', expression: 'cast(source("payment.total"), "number")' },
@@ -285,7 +303,13 @@ describe('update-mapping handler', () => {
       name: 'Invoice Map Updated',
       expectedRevision: 1,
       engineVersion: '1.0.0',
-      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      targetSchemaRef: {
+        schemaId: 'schema-1',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-target-1',
+        contentHash: 'hash-target-1',
+      },
       config: {},
       rules: [
         { target: 'financial.TotalAmount', type: 'string', expression: 'cast(source("payment.total"), "number")' },
@@ -430,7 +454,14 @@ describe('update-mapping handler', () => {
         externalSources: ['legacyAlias'],
       },
       enrichmentSources: [
-        { alias: 'customerProfile', schemaId: 'schema-customer', required: true },
+        {
+          alias: 'customerProfile',
+          schemaId: 'schema-customer',
+          schemaVersion: 1,
+          schemaVersionId: 'sv-customer-1',
+          contentHash: 'hash-customer-1',
+          required: true,
+        },
       ],
       rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
     });
@@ -444,7 +475,7 @@ describe('update-mapping handler', () => {
     }));
     expect(sharedMocks.updateItem).toHaveBeenCalledWith(expect.objectContaining({
       ExpressionAttributeValues: expect.objectContaining({
-        ':enrichmentSources': [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+        ':enrichmentSources': [{ alias: 'customerProfile', schemaId: 'schema-customer', schemaVersion: 1, schemaVersionId: 'sv-customer-1', contentHash: 'hash-customer-1', required: true }],
       }),
     }));
   });
@@ -454,7 +485,7 @@ describe('update-mapping handler', () => {
       projectId: 'proj-1',
       name: 'Invoice Map Updated',
       expectedRevision: 1,
-      enrichmentSources: [{ alias: 'customerProfile' }],
+      enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', schemaVersion: 1 }],
       config: {},
       rules: [],
     });
@@ -471,7 +502,13 @@ describe('update-mapping handler', () => {
       name: 'Invoice Map Updated',
       expectedRevision: 1,
       engineVersion: '1.0.0',
-      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      targetSchemaRef: {
+        schemaId: 'schema-1',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-target-1',
+        contentHash: 'hash-target-1',
+      },
       config: {},
       rules: [
         {
@@ -537,5 +574,22 @@ describe('update-mapping handler', () => {
       mode: 'fallback_value',
       fallbackValue: '',
     });
+  });
+
+  it('rejects source schema ref updates without immutable pin bundle', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      sourceSchemaRef: { schemaId: 'schema-source', type: 'local' },
+      config: {},
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(400);
+    expect(sharedMocks.putObject).not.toHaveBeenCalled();
   });
 });

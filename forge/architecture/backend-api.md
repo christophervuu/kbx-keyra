@@ -1508,3 +1508,67 @@ For deployment-facing API paths (including deploy-context and deployment mutatio
 - Success and error responses (2xx/4xx/5xx) must carry valid CORS headers.
 - Error payloads must use canonical backend envelope + request lineage (`requestId` / `x-request-id`).
 - UI-consumed technical detail structures are additive and must not break canonical envelope semantics.
+
+---
+
+## 20) FS-105 Schema Lifecycle / Mapping Pinning Contract Addendum
+
+FS-105 codifies schema-family lifecycle, immutable-version pinning, and upgrade orchestration boundaries for backend APIs.
+
+### 20.1 Source-of-truth and GitHub behavior boundaries
+
+- User-owned schema lifecycle is KeyRa-native (DynamoDB/S3) and does not depend on user-schema Git publish/sync APIs.
+- Non-CDM user-schema Git publish/sync behavior is retired from canonical API contracts.
+- CDM GitHub integration remains read-only and continues through dedicated CDM routes (`/schemas/cdm*`, `/schemas/:id/sync-cdm`).
+
+### 20.2 Canonical schema lifecycle API semantics
+
+Backend schema APIs are modeled around schema family + draft + immutable versions:
+
+- Exactly one active draft per schema family in Phase 1.
+- Draft save creates a draft revision only when canonical content changed.
+- Explicit create-version operation captures one exact draft revision.
+- No-op version request (draft hash equals latest version hash) returns `noChange` and allocates no new version number.
+- Failed/cancelled version operations consume no visible version number.
+
+### 20.3 Version identity, idempotency, and OCC
+
+Version contracts must expose and enforce:
+
+- immutable UUID `schemaVersionId` identity,
+- deterministic `contentHash`,
+- monotonic `(schemaId, version)` numbering,
+- idempotent create-version retries via idempotency key,
+- optimistic-concurrency guards (e.g., `expectedDraftRevision`) for stale-write protection.
+
+### 20.4 Readiness status separation
+
+Version readiness and derived artifacts are distinct status surfaces:
+
+- `versionStatus`: `creating | ready | failed | deprecated`
+- `indexStatus`: `pending | ready | failed`
+- `impactStatus`: `pending | ready | failed`
+- `sampleValidationStatus`: `pending | ready | failed`
+
+API responses must preserve this separation; downstream failure does not invalidate an already `ready` immutable version.
+
+### 20.5 Mapping schema pinning and upgrade endpoints
+
+Mapping contracts use immutable schema reference bundles for all roles (source/target/enrichment):
+
+- `schemaId`
+- `schemaVersion`
+- `schemaVersionId`
+- `contentHash`
+
+Upgrade contracts:
+
+- preview and apply are explicit operations,
+- apply requires mapping OCC + preview validity,
+- no automatic mapping rewrites,
+- no implicit deploy side effects.
+
+### 20.6 Deployment reproducibility boundary
+
+Deployment-facing APIs must resolve schema dependencies to immutable snapshot/artifact references. Runtime execution must not resolve mutable latest schema state.
+

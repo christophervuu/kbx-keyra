@@ -3,6 +3,7 @@ import type { UsageMapping, UsageProject } from './use-schema-usage';
 import type {
   DisplayFormat,
   FilterDataFormat,
+  FilterLifecycle,
   FilterOwnership,
   FilterStatus,
   SchemaLibraryItem,
@@ -75,6 +76,29 @@ export interface SchemaLibraryQueryData {
   items: SchemaLibraryItem[];
 }
 
+function readArchivedFlag(schema: SchemaMetadata): boolean {
+  const candidate = schema as SchemaMetadata & {
+    archived?: boolean;
+    isArchived?: boolean;
+    archivedAt?: string | null;
+  };
+
+  if (candidate.archived === true || candidate.isArchived === true) {
+    return true;
+  }
+
+  return Boolean(candidate.archivedAt);
+}
+
+function deriveLifecycle(input: {
+  archived: boolean;
+  latestVersion: number;
+}): FilterLifecycle {
+  if (input.archived) return 'archived';
+  if (input.latestVersion > 0) return 'versioned';
+  return 'draft';
+}
+
 export async function loadSchemaLibraryData(adapter: ApiAdapter): Promise<SchemaLibraryQueryData> {
   const [schemas, projectList] = await Promise.all([
     adapter.listSchemas(),
@@ -97,6 +121,8 @@ export async function loadSchemaLibraryData(adapter: ApiAdapter): Promise<Schema
   }
 
   const parsedCountBySchemaId = new Map<string, number>();
+  const latestVersionBySchemaId = new Map<string, number>();
+  const draftRevisionBySchemaId = new Map<string, number | null>();
   const countBackfillCandidates = schemas.filter((schema) => {
     const metadataFieldCount = schema.fieldCount > 0
       ? schema.fieldCount
@@ -129,8 +155,39 @@ export async function loadSchemaLibraryData(adapter: ApiAdapter): Promise<Schema
     }),
   );
 
+  await Promise.all(
+    schemas.map(async (schema) => {
+      if (typeof adapter.listSchemaVersions === 'function') {
+        try {
+          const versions = await adapter.listSchemaVersions(schema.schemaId);
+          const latestVersion = versions.reduce((max, entry) => Math.max(max, entry.version), 0);
+          latestVersionBySchemaId.set(schema.schemaId, latestVersion);
+        } catch {
+          latestVersionBySchemaId.set(schema.schemaId, 0);
+        }
+      } else {
+        latestVersionBySchemaId.set(schema.schemaId, 0);
+      }
+
+      if (typeof adapter.listSchemaDraftRevisions === 'function') {
+        try {
+          const revisions = await adapter.listSchemaDraftRevisions(schema.schemaId);
+          const latestDraftRevision = revisions.reduce((max, entry) => Math.max(max, entry.revision), 0);
+          draftRevisionBySchemaId.set(schema.schemaId, latestDraftRevision > 0 ? latestDraftRevision : null);
+        } catch {
+          draftRevisionBySchemaId.set(schema.schemaId, null);
+        }
+      } else {
+        draftRevisionBySchemaId.set(schema.schemaId, null);
+      }
+    }),
+  );
+
   const items: SchemaLibraryItem[] = schemas.map((schema) => {
     const usage = usageMap.get(schema.schemaId);
+    const archived = readArchivedFlag(schema);
+    const latestVersion = latestVersionBySchemaId.get(schema.schemaId) ?? 0;
+    const draftRevision = draftRevisionBySchemaId.get(schema.schemaId) ?? null;
     return {
       schemaId: schema.schemaId,
       name: schema.name,
@@ -149,6 +206,10 @@ export async function loadSchemaLibraryData(adapter: ApiAdapter): Promise<Schema
       syncStatus: deriveSyncStatus(schema),
       projectCount: usage?.count ?? 0,
       projectNames: usage?.names ?? [],
+      lifecycle: deriveLifecycle({ archived, latestVersion }),
+      latestVersion,
+      draftRevision,
+      archived,
       updatedAt: schema.updatedAt,
       createdAt: schema.createdAt,
     };

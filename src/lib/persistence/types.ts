@@ -6,6 +6,9 @@ export interface SchemaRef {
   readonly schemaId: string;
   readonly type: SchemaRefType;
   readonly commitSha?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
 }
 
 export interface MappingRule {
@@ -30,6 +33,9 @@ export interface MappingEnrichmentSource {
    * Legacy compatibility aliases derived from config.externalSources may omit it.
    */
   readonly schemaId?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
   readonly required?: boolean;
   readonly description?: string;
 }
@@ -351,6 +357,85 @@ export type CanonicalSchemaOrigin = 'cdm' | 'uploaded' | 'inferred';
 
 export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 
+export type SchemaVersionStatus = 'creating' | 'ready' | 'failed' | 'deprecated';
+
+export type SchemaDerivedStatus = 'pending' | 'ready' | 'failed';
+
+export interface SchemaDraftItem {
+  readonly schemaId: string;
+  readonly revision: number;
+  readonly basedOnVersion: number | null;
+  readonly contentHash: string;
+  readonly contentS3Key: string;
+  readonly createdAt: ISODateString;
+  readonly createdBy: string;
+  readonly updatedAt: ISODateString;
+  readonly updatedBy: string;
+}
+
+export interface SchemaVersionItem {
+  readonly schemaId: string;
+  readonly version: number;
+  readonly schemaVersionId: string;
+  readonly draftRevision: number;
+  readonly basedOnVersion: number | null;
+  readonly contentHash: string;
+  readonly contentS3Key: string;
+  readonly idempotencyKey?: string;
+  readonly changeSummary?: string;
+  readonly versionStatus: SchemaVersionStatus;
+  readonly indexStatus: SchemaDerivedStatus;
+  readonly impactStatus: SchemaDerivedStatus;
+  readonly sampleValidationStatus: SchemaDerivedStatus;
+  readonly createdAt: ISODateString;
+  readonly createdBy: string;
+}
+
+/**
+ * Stable schema-node identity sidecar record for immutable schema versions.
+ *
+ * Stored independently from raw schema document content so internal IDs are not
+ * injected into user-authored schema bodies.
+ */
+export interface SchemaNodeIdentity {
+  readonly schemaVersionId: string;
+  readonly fieldId: string;
+  readonly jsonPointer: string;
+  readonly parentFieldId?: string;
+}
+
+/**
+ * Structural node input used to reconcile identities across draft edits.
+ */
+export interface SchemaIdentityNodePointer {
+  readonly jsonPointer: string;
+  readonly parentJsonPointer?: string;
+}
+
+export interface SaveSchemaDraftInput {
+  readonly content: Record<string, unknown>;
+  readonly expectedRevision?: number;
+  readonly updatedBy: string;
+}
+
+export interface SaveSchemaDraftResult {
+  readonly noChange: boolean;
+  readonly item: SchemaDraftItem;
+}
+
+export interface CreateSchemaVersionInput {
+  readonly createdBy: string;
+  readonly expectedDraftRevision?: number;
+  readonly idempotencyKey?: string;
+  readonly changeSummary?: string;
+}
+
+export interface CreateSchemaVersionResult {
+  readonly noChange: boolean;
+  readonly replayed?: boolean;
+  readonly item?: SchemaVersionItem;
+}
+
 /**
  * @deprecated FS-087 compatibility-only field.
  * Scope must not drive schema availability behavior.
@@ -668,6 +753,19 @@ export type DeploymentSourceType = 'revision' | 'version';
 
 export type DeploymentSchemaReferenceRole = 'source' | 'target';
 
+export type DeploymentSchemaArtifactRole = 'source' | 'target' | 'enrichment';
+
+export interface DeployedSchemaArtifactRef {
+  readonly role: DeploymentSchemaArtifactRole;
+  readonly schemaId: string;
+  readonly schemaVersion: number;
+  readonly schemaVersionId: string;
+  readonly contentHash: string;
+  readonly contentS3Key: string;
+  readonly parsedArtifactS3Key?: string;
+  readonly alias?: string;
+}
+
 export interface DeploymentCdmSchemaTraceabilityEntry {
   readonly schemaId: string;
   readonly schemaName?: string;
@@ -679,6 +777,7 @@ export interface DeploymentCdmSchemaTraceabilityEntry {
 
 export interface DeploymentSnapshotMetadata {
   readonly cdmSchemaTraceability?: readonly DeploymentCdmSchemaTraceabilityEntry[];
+  readonly schemaRefs?: readonly DeployedSchemaArtifactRef[];
 }
 
 /**

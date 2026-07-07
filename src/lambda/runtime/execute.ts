@@ -223,6 +223,50 @@ function parseSnapshotConfig(snapshotRaw: string): Parameters<typeof execute>[0]
   return null;
 }
 
+function hasImmutableSchemaBundle(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const metadata = record.metadata;
+  if (!metadata || typeof metadata !== 'object') {
+    return false;
+  }
+
+  const schemaRefs = (metadata as Record<string, unknown>).schemaRefs;
+  return Array.isArray(schemaRefs);
+}
+
+function hasDerivableImmutableSchemaPins(config: RuntimeMappingConfig): boolean {
+  const source = (config as { sourceSchemaRef?: unknown }).sourceSchemaRef;
+  const target = (config as { targetSchemaRef?: unknown }).targetSchemaRef;
+
+  const hasPinnedRef = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const record = value as Record<string, unknown>;
+    const schemaVersion = record.schemaVersion;
+    return (
+      typeof record.schemaId === 'string'
+      && typeof schemaVersion === 'number'
+      && Number.isInteger(schemaVersion)
+      && schemaVersion > 0
+      && typeof record.schemaVersionId === 'string'
+      && typeof record.contentHash === 'string'
+    );
+  };
+
+  if (hasPinnedRef(source) || hasPinnedRef(target)) {
+    return true;
+  }
+
+  const enrichments = Array.isArray(config.enrichmentSources) ? config.enrichmentSources : [];
+  return enrichments.some((entry) => hasPinnedRef(entry));
+}
+
 function hasUnresolvedProjectValueTableReferences(config: Parameters<typeof execute>[0]): boolean {
   const rules = Array.isArray((config as { rules?: unknown }).rules)
     ? ((config as { rules: readonly unknown[] }).rules)
@@ -351,6 +395,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       Key: snapshotKey,
     });
 
+    const snapshotPayload = JSON.parse(rawSnapshot) as unknown;
     const config = parseSnapshotConfig(rawSnapshot);
     if (!config) {
       logExecute({
@@ -368,6 +413,20 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         false,
         requestId,
         runtimeTaxonomyDetails('SnapshotInvalid'),
+      );
+    }
+
+    if (!hasImmutableSchemaBundle(snapshotPayload)) {
+      console.warn(
+        JSON.stringify({
+          eventType: 'execute-legacy-snapshot-schema-bundle-missing',
+          requestId,
+          mappingId: request.mappingId,
+          snapshotId: active.activeSnapshotId,
+          compatibilityFallback: hasDerivableImmutableSchemaPins(config as RuntimeMappingConfig)
+            ? 'derived-from-config-pins'
+            : 'migration-window-allowed',
+        }),
       );
     }
 

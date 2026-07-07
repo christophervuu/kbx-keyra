@@ -8,6 +8,9 @@ export interface SchemaRef {
   readonly schemaId: string;
   readonly type: SchemaRefType;
   readonly commitSha?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
 }
 
 export interface MappingConfigBlock {

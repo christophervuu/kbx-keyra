@@ -89,6 +89,8 @@ src/
       get-version.ts    GET /mappings/:mappingId/versions/:version handler
       create-version.ts POST /mappings/:mappingId/versions handler (create milestone from latest revision; optional implicitSave)
       save-version.ts   Backward-compatible shim exporting create-version handler
+      schema-upgrade-preview.ts POST /mappings/:mappingId/schema-upgrade/preview handler (immutable pin validation + parser/identity-based role impact preview + suggestion baseline token)
+      schema-upgrade-apply.ts POST /mappings/:mappingId/schema-upgrade/apply handler (explicit confirmation + suggestion acceptance + preview invalidation/OCC guard + revision-only apply)
       index.ts          Mapping lambda barrel exports
     deployment/       Deployment policy lambdas (FS-064 T-02)
       cdm-deploy-guard.ts Reusable CDM deploy-context validation guard for deploy/promote handlers (FS-079 T-01)
@@ -147,6 +149,9 @@ src/
       mappings.ts       Mappings metadata + S3 config operations (create/get/listByProject/update/delete/duplicate) with revision/version compatibility fields
       schema-metadata.ts SchemaMetadata table CRUD + status transition update operation
       schema-nodes.ts   SchemaNodes partition query/batch-write/delete operations with retry/backoff
+      schema-drafts.ts  Schema draft revision persistence operations (single active draft semantics, OCC/no-change save behavior, basedOnVersion tracking) (FS-105 T-03)
+      schema-versions.ts Schema immutable version persistence operations (UUID schemaVersionId identity, monotonic version allocation, no-change detection) (FS-105 T-03)
+      schema-reference-backfill.ts FS-105 migration/backfill helpers for mapping/deployment schema reference normalization with dry-run/idempotent reporting
       sync-activity.ts  CDM re-sync activity logger — writes outcome to SyncActivity DynamoDB table (FS-077 T-05)
       mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
       mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
@@ -166,8 +171,11 @@ src/
       index.ts          Schema module barrel exports
       types.ts          Schema ingestion/query interfaces and unions
       retriever.ts      Runtime schema retriever abstraction (`RAG_RETRIEVER`: dynamodb only after FS-091 T-08 cutover)
+      lifecycle.ts      Schema lifecycle service utilities (canonical content hash, draft save orchestration, immutable version creation/basedOnVersion update flow) (FS-105 T-03)
+      patch-engine.ts   Lossless JSON Pointer patch engine for guided schema edits with guarded unsupported-operation rejection and destructive change-summary gating (FS-105 T-06)
       retrieval-parity.ts Shared Top-K parity metric helpers (Jaccard@K, NDCG@K delta) and gate evaluation utilities (FS-091 T-07)
       cutover-readiness.ts Retrieval latency/quality gate evaluation helpers for FS-091 cutover decisions (p95 tier targets + acceptance-rate safety checks)
+      mapping-impact.ts  Mapping schema-upgrade impact extraction helpers (AST-based accessor usage extraction + role-aware impact classification)
       constants.ts      Ingestion threshold and batch sizing constants
       embedding-text.ts Canonical embedding text generation utility
       parser/           Pure schema parsing module (JSON Schema + XSD) (FS-056 T-02)
@@ -178,9 +186,11 @@ src/
       cdm/              CDM relative $ref dependency resolver (FS-077 T-02)
         index.ts          CDM resolver barrel exports
         dependency-resolver.ts Relative $ref resolver with folder allowlist, depth/cycle guards, and FETCH_FAILED/UNRESOLVED_REF/CYCLE_DETECTED errors
-      diff/             Schema node field-level diff utility (FS-077 T-04)
+      diff/             Schema node field-level diff utility (FS-077 T-04, FS-105 T-05)
         index.ts          Diff barrel export
         diff-summary.ts   Pure computeSchemaDiff(): added/removed/modified via path + structural fingerprint (type, isArray, depth)
+        identity-diff.ts  Pure computeSchemaIdentityDiff(): add/remove/rename/move classification using stable fieldId lineage (FS-105 T-05)
+      identity.ts        Schema node identity sidecar utilities (JSON Pointer extraction, lifecycle transforms, and version-sidecar persistence wiring) (FS-105 T-05)
       dynamo/           DynamoDB metadata/node writer module (FS-056 T-04)
         index.ts          Dynamo writer barrel exports
         metadata-writer.ts SchemaMetadata put/update/get operations + updateSyncMetadata for CDM sync outcome fields (FS-077 T-05)
@@ -461,6 +471,8 @@ ui/
           ConfirmDialog.test.tsx     Component tests (12 tests: rendering, focus trap, keyboard, callbacks)
           DiagnosticDetail.tsx       Expandable diagnostic panel (code, severity badge, message, expression snippet)
           EditorTopBar.tsx           Top bar (name, version, save status, deploy badges, schema names, deploy link); FS-039 T-11: unsavedCount→unsavedChangeCount, onViewUnsavedChanges prop, "View changes" button with badge (visible when unsavedChangeCount > 0), Save disabled when unsavedChangeCount === 0; T-12: route blocker uses hasUnsavedChanges, dialog "Discard and leave?" with revertAllDrafts on confirm
+          SchemaUpgradeStrip.tsx     FS-105 mapping schema-version pin + explicit upgrade UI strip: role-scoped pin status (`Current`/`Update available`/`Review required`/`Upgrade blocked`), Review update preview summary, suggestion acceptance checkboxes, preview-invalidation refresh affordance, and explicit Apply upgrade action surface (no auto-save/deploy)
+          SchemaUpgradeStrip.test.tsx Component tests for FS-105 strip status labels, pinned/latest version display, and suggestion-review requirement before apply
           ErrorTooltip.tsx           Inline error tooltip card: code badge + message, severity-driven color scheme (red/yellow/blue), positioned relative to editor (T-04)
           ExpressionBuilderPanel.tsx Panel 4 shell: mode toggle calls switchToEditor/switchToBuilder, empty state, builder/editor content slots (T-01/T-05); ComplexExpressionWarning when decomposition fails (T-08); unsaved-changes indicator (AE-12)
           ExpressionBuilderPanel.test.tsx Component tests (12 tests: empty state, mode toggle, slots, unsaved indicator, decomposition warning, stay/try actions)
@@ -878,7 +890,8 @@ tests/
       get-schema-sample.test.ts Sample payload read endpoint tests (raw+parsed return and 404 behavior)
       delete-schema-sample.test.ts Sample payload delete endpoint tests (metadata+blob removal and 404 behavior)
       create-schema.test.ts CRUD create tests (ready vs ingesting + validation) (FS-057 T-05)
-      update-schema.test.ts PUT schema update tests (metadata/content update, validation, and service-error mapping)
+      create-version.test.ts Schema immutable-version endpoint tests (expectedDraftRevision OCC, idempotency replay, and conflict/error classification) (FS-105 T-04)
+      update-schema.test.ts PUT schema update tests (metadata/content update, validation, service-error mapping, and JSON Pointer patch flow/guardrails) (FS-105 T-06)
       get-schema.test.ts CRUD get tests (content fetch + 404) (FS-057 T-05)
       list-schemas.test.ts CRUD list tests (multiple + empty) (FS-057 T-05)
       list-cdm-schemas.test.ts CDM browse tests (root guard + one-level navigation + read-only GitHub usage) (FS-076 T-02)
@@ -908,6 +921,8 @@ tests/
       list-versions.test.ts List mapping versions tests (descending order + empty)
       get-version.test.ts Get mapping version tests (200 + revision pointer + 404)
       create-version.test.ts Create mapping version tests (201 from latest revision)
+      schema-upgrade-preview.test.ts Schema-upgrade preview tests (pin/revision guards + role impact/suggestions response)
+      schema-upgrade-apply.test.ts Schema-upgrade apply tests (explicit confirm/acceptance guards, preview invalidation, OCC/revision apply semantics)
       save-version.test.ts Save mapping version shim tests (delegates to create-version flow)
       save-deploy-separation.test.ts Save/update path regression tests asserting Save != Deploy (no deploy/promote orchestration writes) (FS-083 T-03)
       preview-mapping.test.ts Server preview handler tests (runtime environment routing, local active-artifact execution, provenance metadata, not-deployed behavior) (FS-081 T-05)
@@ -949,19 +964,23 @@ tests/
           dsl-reference.md  DSL reference fixture content
   infrastructure/     Infrastructure template contract tests
     runtime-bootstrap-template.test.ts Runtime bootstrap SAM template assertions for SANDBOX support, least-privilege runtime role boundaries, and FS-101 Auto-Map infra contracts (table/index/TTL/PITR env + Step Functions resource scoping)
-  schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
+    schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
+      mapping-impact.test.ts Mapping impact utility tests (AST extraction false-positive guard + role-aware impact classification)
       types.test.ts    Type contract tests and inline threshold env parsing tests
       retriever.test.ts Runtime schema retriever mode parsing/routing/shadow non-fatal behavior tests (FS-091 T-01)
       retrieval-parity.test.ts Unit tests for parity metrics and FS-091 Jaccard/NDCG gate evaluation
       cutover-readiness.test.ts Unit tests for p95 tier latency gates, acceptance-rate safety gate, and overall go/no-go evaluation
       embedding-text.test.ts Embedding text formatting tests (AE-11, AE-12)
+      identity.test.ts Stable schema node identity sidecar lifecycle tests (rename/move preserve IDs; duplicate/delete-readd allocate new IDs; restore reuses historical IDs) (FS-105 T-05)
+      patch-engine.test.ts Lossless patch engine tests for unsupported-subtree preservation, restricted-operation rejection, and add-field/destructive validation gates (FS-105 T-06)
       parser/          Schema parser tests (FS-056 T-02)
         parse-json-schema.test.ts JSON Schema parser unit and performance tests
         parse-xsd.test.ts XSD parser unit tests
       cdm/             CDM dependency resolver tests (FS-077 T-02)
         dependency-resolver.test.ts $ref resolution, allowlist, cycle/depth/limit guards
-      diff/            Schema node diff summary tests (FS-077 T-04)
+      diff/            Schema node diff summary tests (FS-077 T-04, FS-105 T-05)
         diff-summary.test.ts added/removed/modified classification, large-schema stability, deterministic ordering
+        identity-diff.test.ts add/remove/rename/move classification via stable fieldId lineage
       dynamo/          Schema DynamoDB writer tests (FS-056 T-04)
         metadata-writer.test.ts SchemaMetadata writer operation tests
         node-writer.test.ts SchemaNodes batch chunk/retry tests
@@ -978,7 +997,10 @@ tests/
       mappings.test.ts Mappings CRUD/GSI/revision+version increment/S3-config tests with mocked Dynamo+S3 clients
       hash.test.ts      Config hash determinism and stable key-order hashing tests
       schema-metadata.test.ts SchemaMetadata CRUD + updateStatus expression/defaults tests
-      schema-nodes.test.ts SchemaNodes batch chunking/retry, partition query, contains-filter, and delete-by-schema tests
+      schema-nodes.test.ts SchemaNodes batch chunking/retry, partition query, contains-filter, delete-by-schema, and identity sidecar persistence/query tests
+      schema-drafts.test.ts Schema draft persistence tests (no-change save behavior, OCC expectedRevision guard, basedOnVersion propagation) (FS-105 T-03)
+      schema-versions.test.ts Schema version persistence tests (monotonic allocation, no-change behavior, failed-create non-consumption) (FS-105 T-03)
+      schema-reference-backfill.test.ts Schema reference migration/backfill tests (dry-run parity, selective update behavior, deterministic reporting)
       mapping-revisions.test.ts MappingRevisions save/no-op/list/get/getConfig/prune behavior tests with mocked Dynamo+S3 clients
       mapping-versions.test.ts MappingVersions milestone create/list/get tests with mocked Dynamo client
       deployments.test.ts Deployments persistence tests (create/getCurrent/getCurrentAll/listHistory + runtime active-pointer conditional update semantics) with mocked Dynamo+S3 snapshot helper
@@ -1005,6 +1027,7 @@ tests/
       schema-nodes.integration.test.ts SchemaNodes batchWrite/list/queryContains/deleteBySchema integration cycle
       mapping-revisions.integration.test.ts MappingRevisions save/list/get/getConfig + selective-prune integration cycle
       mapping-versions.integration.test.ts MappingVersions milestone create/list/get integration cycle
+      schema-lifecycle.integration.test.ts Schema draft/version lifecycle integration cycle (draft no-change, version no-change, failed-create non-consumption, and identity sidecar restore-preserves-historical-ids check) (FS-105 T-03/T-05)
       deployments.integration.test.ts Deployments + DeploymentCurrent integration cycle (create/current/history)
       s3-content.integration.test.ts Schema content + mapping config S3 helper integration cycle
     schema-ingestion/  FS-056 end-to-end ingestion/query orchestration tests

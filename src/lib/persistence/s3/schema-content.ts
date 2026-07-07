@@ -1,7 +1,7 @@
 import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand, type GetObjectCommandOutput } from '@aws-sdk/client-s3';
 
 import { s3Client } from '../clients.js';
-import { BUCKET_NAME, schemaContentKey, schemaOriginalKey } from '../config.js';
+import { BUCKET_NAME, schemaContentKey, schemaDraftRevisionContentKey, schemaOriginalKey, schemaVersionContentKey } from '../config.js';
 
 type OriginalFormat = 'json' | 'xsd';
 
@@ -77,6 +77,80 @@ export async function get(schemaId: string): Promise<Record<string, unknown> | n
   }
 }
 
+export async function putDraftRevision(schemaId: string, revision: number, content: Record<string, unknown>): Promise<string> {
+  const key = schemaDraftRevisionContentKey(schemaId, revision);
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      Body: JSON.stringify(content),
+      ContentType: 'application/json',
+    }),
+  );
+
+  return key;
+}
+
+export async function getDraftRevision(schemaId: string, revision: number): Promise<Record<string, unknown> | null> {
+  try {
+    const output = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: schemaDraftRevisionContentKey(schemaId, revision),
+      }),
+    );
+
+    const content = await readObjectBodyAsString(output);
+    if (!content) {
+      return null;
+    }
+
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch (error) {
+    if (isNoSuchKey(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function putVersion(schemaId: string, version: number, content: Record<string, unknown>): Promise<string> {
+  const key = schemaVersionContentKey(schemaId, version);
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      Body: JSON.stringify(content),
+      ContentType: 'application/json',
+    }),
+  );
+
+  return key;
+}
+
+export async function getVersion(schemaId: string, version: number): Promise<Record<string, unknown> | null> {
+  try {
+    const output = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: schemaVersionContentKey(schemaId, version),
+      }),
+    );
+
+    const content = await readObjectBodyAsString(output);
+    if (!content) {
+      return null;
+    }
+
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch (error) {
+    if (isNoSuchKey(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function getOriginal(schemaId: string, format: OriginalFormat): Promise<string | null> {
   try {
     const output = await s3Client.send(
@@ -115,7 +189,11 @@ export { remove as delete };
 export const schemaContent = {
   putOriginal,
   putProcessed,
+  putDraftRevision,
+  putVersion,
   get,
+  getDraftRevision,
   getOriginal,
+  getVersion,
   delete: remove,
 };

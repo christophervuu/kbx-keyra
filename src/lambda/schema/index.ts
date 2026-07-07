@@ -8,6 +8,7 @@ export { handler as markSchemaReviewedHandler } from './mark-reviewed.js';
 export { handler as addSchemaSampleHandler } from './add-schema-sample.js';
 export { handler as getSchemaSampleHandler } from './get-schema-sample.js';
 export { handler as deleteSchemaSampleHandler } from './delete-schema-sample.js';
+export { handler as createSchemaVersionHandler } from './create-version.js';
 export { handler as listCdmSchemasHandler } from './list-cdm-schemas.js';
 export { handler as linkCdmSchemaHandler } from './link-cdm-schema.js';
 export { handler as syncAllCdmSchemasHandler } from './sync-all-cdm-schemas.js';

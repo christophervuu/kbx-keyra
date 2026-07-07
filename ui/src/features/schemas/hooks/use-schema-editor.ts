@@ -55,6 +55,11 @@ export interface UseSchemaEditorResult {
   }) => Promise<void>;
   /** Add a new root-level field and persist immediately */
   addRootField: () => Promise<void>;
+  addFieldWithValidation: (input: {
+    parentPath: string | null;
+    fieldName: string;
+    type: SchemaNodeType;
+  }) => Promise<void>;
 }
 
 function findNodeByPath(nodes: SchemaTreeNode[], path: string): SchemaTreeNode | null {
@@ -207,6 +212,21 @@ export function useSchemaEditor(
     await persistNodes(nextNodes);
   }, [editedNodes, isEditing, parsedSchema?.nodes, persistNodes]);
 
+  const addFieldWithValidation = useCallback(async (input: {
+    parentPath: string | null;
+    fieldName: string;
+    type: SchemaNodeType;
+  }) => {
+    const trimmed = input.fieldName.trim();
+    if (!trimmed) {
+      throw new Error('Field name is required.');
+    }
+
+    const baseNodes = (isEditing ? editedNodes : parsedSchema?.nodes) ?? [];
+    const nextNodes = addField(baseNodes, input.parentPath, trimmed, input.type);
+    await persistNodes(nextNodes);
+  }, [editedNodes, isEditing, parsedSchema?.nodes, persistNodes]);
+
   // ---- Tree operation dispatchers ----
 
   const editCallbacks = useMemo<EditNodeCallbacks>(
@@ -269,5 +289,6 @@ export function useSchemaEditor(
     editCallbacks,
     saveFieldEdits,
     addRootField,
+    addFieldWithValidation,
   };
 }

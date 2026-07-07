@@ -28,6 +28,8 @@ import type {
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
+  CreateSchemaVersionInput,
+  CreateSchemaVersionResult,
   DeploymentContext,
   DeploymentDiff,
   DeploymentRecord as LegacyDeploymentRecord,
@@ -44,11 +46,17 @@ import type {
   MappingSaveResult,
   MappingVersion,
   MappingVersionEntry,
+  MappingSchemaUpgradeApplyInput,
+  MappingSchemaUpgradeApplyResult,
+  MappingSchemaUpgradePreviewInput,
+  MappingSchemaUpgradePreviewResult,
   ProjectValueTable,
   ProjectValueTableRevision,
-  PublishSchemaInput,
   ProjectDetail,
   ProjectMetadata,
+  SaveSchemaDraftInput,
+  SaveSchemaDraftResult,
+  SchemaDraftRevision,
   ResolveProjectValueTableReferenceInput,
   ResolveProjectValueTableReferenceResult,
   SchemaDetail,
@@ -56,14 +64,17 @@ import type {
   SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
+  SchemaVersionEntry,
   ServerPreviewInput,
   ServerPreviewResult,
+  SetDefaultSchemaSampleInput,
   SmartFixInput,
   SmartFixResult,
   SuggestExpressionInput,
   SuggestExpressionResult,
   TemplateDetail,
   TemplateMetadata,
+  UpdateSchemaSampleInput,
   UpdateProjectInput,
   UpdateSchemaInput,
   ValueTableDiffPage,
@@ -247,6 +258,40 @@ export class HttpAdapter extends LocalStorageAdapter {
     });
   }
 
+  override async saveSchemaDraft(id: string, input: SaveSchemaDraftInput): Promise<SaveSchemaDraftResult> {
+    return httpRequest<SaveSchemaDraftResult>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/draft`,
+      method: 'PUT',
+      body: input,
+    });
+  }
+
+  override async listSchemaDraftRevisions(id: string): Promise<SchemaDraftRevision[]> {
+    return httpRequest<SchemaDraftRevision[]>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/draft/revisions`,
+      method: 'GET',
+    });
+  }
+
+  override async createSchemaVersion(id: string, input: CreateSchemaVersionInput): Promise<CreateSchemaVersionResult> {
+    return httpRequest<CreateSchemaVersionResult>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/versions`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async listSchemaVersions(id: string): Promise<SchemaVersionEntry[]> {
+    return httpRequest<SchemaVersionEntry[]>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/versions`,
+      method: 'GET',
+    });
+  }
+
   override async markSchemaReviewed(id: string): Promise<SchemaMetadata> {
     const response = await httpRequest<{
       metadata: SchemaMetadata;
@@ -267,6 +312,28 @@ export class HttpAdapter extends LocalStorageAdapter {
       method: 'POST',
       body: input,
     });
+  }
+
+  override async updateSchemaSample(id: string, sampleId: string, input: UpdateSchemaSampleInput): Promise<SchemaMetadata> {
+    const response = await httpRequest<{ metadata: SchemaMetadata }>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}`,
+      method: 'PUT',
+      body: input,
+    });
+
+    return response.metadata;
+  }
+
+  override async setDefaultSchemaSample(id: string, input: SetDefaultSchemaSampleInput): Promise<SchemaMetadata> {
+    const response = await httpRequest<{ metadata: SchemaMetadata }>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples/default`,
+      method: 'POST',
+      body: input,
+    });
+
+    return response.metadata;
   }
 
   override async deleteSchemaSample(id: string, sampleId: string): Promise<SchemaMetadata> {
@@ -355,6 +422,30 @@ export class HttpAdapter extends LocalStorageAdapter {
       path: `/mappings/${encodeURIComponent(id)}/duplicate`,
       method: 'POST',
       body: { name: newName },
+    });
+  }
+
+  override async previewSchemaUpgrade(
+    mappingId: string,
+    input: MappingSchemaUpgradePreviewInput,
+  ): Promise<MappingSchemaUpgradePreviewResult> {
+    return httpRequest<MappingSchemaUpgradePreviewResult>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/schema-upgrade/preview`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async applySchemaUpgrade(
+    mappingId: string,
+    input: MappingSchemaUpgradeApplyInput,
+  ): Promise<MappingSchemaUpgradeApplyResult> {
+    return httpRequest<MappingSchemaUpgradeApplyResult>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/schema-upgrade/apply`,
+      method: 'POST',
+      body: input,
     });
   }
 
@@ -702,7 +793,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     throw this.featureNotEnabled('listPublishedSchemas');
   }
 
-  override async publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void> {
+  override async publishSchemaToGitHub(schemaId: string, input: { repo: string; branch: string; path: string; commitMessage?: string }): Promise<void> {
     void schemaId;
     void input;
     throw this.featureNotEnabled('publishSchemaToGitHub');

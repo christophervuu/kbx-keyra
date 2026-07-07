@@ -50,7 +50,7 @@ describe('duplicate-mapping handler', () => {
       status: 'ready',
       sourceSchemaId: 'schema-a',
       targetSchemaId: 'schema-b',
-      enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+      enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', schemaVersion: 1, schemaVersionId: 'sv-customer-1', contentHash: 'hash-customer-1', required: true }],
       ruleCount: 10,
       coverage: 90,
       configS3Key: 'mappings/map-1/config.json',
@@ -64,9 +64,9 @@ describe('duplicate-mapping handler', () => {
         name: 'Invoice Map',
         version: 5,
         engineVersion: '1.0.0',
-        sourceSchemaRef: { schemaId: 'schema-a', type: 'local' },
-        targetSchemaRef: { schemaId: 'schema-b', type: 'local' },
-        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+        sourceSchemaRef: { schemaId: 'schema-a', type: 'local', schemaVersion: 1, schemaVersionId: 'sv-a-1', contentHash: 'hash-a-1' },
+        targetSchemaRef: { schemaId: 'schema-b', type: 'local', schemaVersion: 1, schemaVersionId: 'sv-b-1', contentHash: 'hash-b-1' },
+        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', schemaVersion: 1, schemaVersionId: 'sv-customer-1', contentHash: 'hash-customer-1', required: true }],
         config: {},
         rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
       }),
@@ -89,13 +89,13 @@ describe('duplicate-mapping handler', () => {
       name: string;
       version: number;
       ruleCount: number;
-      enrichmentSources?: Array<{ alias: string; schemaId?: string; required?: boolean }>;
+      enrichmentSources?: Array<{ alias: string; schemaId?: string; schemaVersion?: number; schemaVersionId?: string; contentHash?: string; required?: boolean }>;
     };
     expect(parsed.mappingId).not.toBe('map-1');
     expect(parsed.name).toBe('Invoice Map (Copy)');
     expect(parsed.version).toBe(1);
     expect(parsed.ruleCount).toBe(10);
-    expect(parsed.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
+    expect(parsed.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', schemaVersion: 1, schemaVersionId: 'sv-customer-1', contentHash: 'hash-customer-1', required: true }]);
   });
 
   it('missing source mapping returns 404', async () => {

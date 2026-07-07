@@ -105,6 +105,21 @@ describe('create-mapping handler', () => {
     expect(parsed.businessContext).toBeUndefined();
   });
 
+  it('rejects source schema ref without immutable pin bundle', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      sourceSchemaRef: { schemaId: 'schema-source', type: 'local' },
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(400);
+    expect(sharedMocks.putItem).not.toHaveBeenCalled();
+  });
+
   it('accepts additive editorPreferences in config payload', async () => {
     sharedMocks.parseBody.mockReturnValue({
       projectId: 'proj-1',
@@ -132,7 +147,14 @@ describe('create-mapping handler', () => {
       projectId: 'proj-1',
       name: 'Invoice Map',
       enrichmentSources: [
-        { alias: 'customerProfile', schemaId: 'schema-customer', required: true },
+        {
+          alias: 'customerProfile',
+          schemaId: 'schema-customer',
+          schemaVersion: 1,
+          schemaVersionId: 'sv-customer-1',
+          contentHash: 'hash-customer-1',
+          required: true,
+        },
       ],
       config: {
         externalSources: ['legacyAlias'],
@@ -145,14 +167,14 @@ describe('create-mapping handler', () => {
 
     expect(result.statusCode).toBe(201);
     expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
-      Body: expect.stringContaining('"enrichmentSources":[{"alias":"customerProfile","schemaId":"schema-customer","required":true}]'),
+      Body: expect.stringContaining('"enrichmentSources":[{"alias":"customerProfile","schemaId":"schema-customer","schemaVersion":1,"schemaVersionId":"sv-customer-1","contentHash":"hash-customer-1","required":true}]'),
     }));
     expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
       Body: expect.stringContaining('"externalSources":["customerProfile","legacyAlias"]'),
     }));
     expect(sharedMocks.putItem).toHaveBeenCalledWith(expect.objectContaining({
       Item: expect.objectContaining({
-        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', schemaVersion: 1, schemaVersionId: 'sv-customer-1', contentHash: 'hash-customer-1', required: true }],
       }),
     }));
   });
@@ -183,8 +205,8 @@ describe('create-mapping handler', () => {
       projectId: 'proj-1',
       name: 'Invoice Map',
       enrichmentSources: [
-        { alias: 'dup', schemaId: 'schema-a' },
-        { alias: 'dup', schemaId: 'schema-b' },
+        { alias: 'dup', schemaId: 'schema-a', schemaVersion: 1, schemaVersionId: 'sv-a-1', contentHash: 'hash-a-1' },
+        { alias: 'dup', schemaId: 'schema-b', schemaVersion: 1, schemaVersionId: 'sv-b-1', contentHash: 'hash-b-1' },
       ],
       rules: [],
     });
@@ -200,7 +222,13 @@ describe('create-mapping handler', () => {
       projectId: 'proj-1',
       name: 'Invoice Map',
       engineVersion: '1.0.0',
-      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      targetSchemaRef: {
+        schemaId: 'schema-1',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-target-1',
+        contentHash: 'hash-target-1',
+      },
       rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
     });
     sharedMocks.getItem.mockResolvedValue({ schemaId: 'schema-1', format: 'json-schema' });
@@ -228,7 +256,13 @@ describe('create-mapping handler', () => {
       projectId: 'proj-1',
       name: 'Invoice Map',
       engineVersion: '1.0.0',
-      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      targetSchemaRef: {
+        schemaId: 'schema-1',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-target-1',
+        contentHash: 'hash-target-1',
+      },
       rules: [
         {
           target: 'transaction.status',

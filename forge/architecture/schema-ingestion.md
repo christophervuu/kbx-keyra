@@ -264,3 +264,34 @@ Automated coverage for this subsystem is split across:
 - `tests/integration/schema-ingestion/` — end-to-end orchestration behavior and performance guardrails
 
 Integration coverage includes threshold behavior (50/499 inline, 500+ orchestrated), large-schema batching/chunking behavior, query filtering/enrichment, and FS-091 cutover-readiness gate assertions.
+
+---
+
+## 11) FS-105 lifecycle/indexing boundary addendum
+
+FS-105 introduces lifecycle/readiness constraints that affect schema-ingestion responsibilities.
+
+### 11.1 Ingestion ownership boundary
+
+Schema-ingestion owns parse/index preparation and retrieval-facing node materialization. It does not own schema-family draft/version lifecycle transitions.
+
+### 11.2 Immutable version indexing contract
+
+When a new immutable schema version is created:
+
+- immutable content commit and structural validation determine version usability,
+- indexing is an asynchronous derived operation.
+
+Therefore:
+
+- ingestion/index failures after version commit must update index/readiness status surfaces,
+- those failures must not invalidate already committed immutable version usability.
+
+### 11.3 CDM re-sync contract compatibility
+
+CDM re-sync remains read-only ingestion from GitHub and must materialize changes as immutable new versions rather than mutable edits of existing versions.
+
+### 11.4 Deprecated user-schema Git behavior boundary
+
+FS-105 retires non-CDM user-schema publish/sync behavior. This does not alter CDM ingestion flows documented in this subsystem.
+

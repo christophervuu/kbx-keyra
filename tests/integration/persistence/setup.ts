@@ -28,6 +28,8 @@ export const TEST_TABLES = {
   mappings: `keyra-mappings-it-${SUFFIX}`,
   schemaMetadata: `keyra-schema-metadata-it-${SUFFIX}`,
   schemaNodes: `keyra-schema-nodes-it-${SUFFIX}`,
+  schemaDrafts: `keyra-schema-drafts-it-${SUFFIX}`,
+  schemaVersions: `keyra-schema-versions-it-${SUFFIX}`,
   mappingRevisions: `keyra-mapping-revisions-it-${SUFFIX}`,
   mappingVersions: `keyra-mapping-versions-it-${SUFFIX}`,
   deployments: `keyra-deployments-it-${SUFFIX}`,
@@ -75,6 +77,8 @@ export function applyPersistenceTestEnvironment(): void {
   processRef.env.MAPPINGS_TABLE = TEST_TABLES.mappings;
   processRef.env.SCHEMA_METADATA_TABLE = TEST_TABLES.schemaMetadata;
   processRef.env.SCHEMA_NODES_TABLE = TEST_TABLES.schemaNodes;
+  processRef.env.SCHEMA_DRAFTS_TABLE = TEST_TABLES.schemaDrafts;
+  processRef.env.SCHEMA_VERSIONS_TABLE = TEST_TABLES.schemaVersions;
   processRef.env.MAPPING_REVISIONS_TABLE = TEST_TABLES.mappingRevisions;
   processRef.env.MAPPING_VERSIONS_TABLE = TEST_TABLES.mappingVersions;
   processRef.env.DEPLOYMENTS_TABLE = TEST_TABLES.deployments;
@@ -173,6 +177,32 @@ export async function createTables(): Promise<void> {
   }));
 
   await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.schemaDrafts,
+    AttributeDefinitions: [
+      { AttributeName: 'schemaId', AttributeType: 'S' },
+      { AttributeName: 'revision', AttributeType: 'N' },
+    ],
+    KeySchema: [
+      { AttributeName: 'schemaId', KeyType: 'HASH' },
+      { AttributeName: 'revision', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.schemaVersions,
+    AttributeDefinitions: [
+      { AttributeName: 'schemaId', AttributeType: 'S' },
+      { AttributeName: 'version', AttributeType: 'N' },
+    ],
+    KeySchema: [
+      { AttributeName: 'schemaId', KeyType: 'HASH' },
+      { AttributeName: 'version', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await dynamo.send(new CreateTableCommand({
     TableName: TEST_TABLES.mappingRevisions,
     AttributeDefinitions: [
       { AttributeName: 'mappingId', AttributeType: 'S' },
@@ -251,6 +281,8 @@ export async function clearTablesData(): Promise<void> {
   await clearTable(TEST_TABLES.mappingRevisions, ['mappingId', 'revision']);
   await clearTable(TEST_TABLES.mappingVersions, ['mappingId', 'version']);
   await clearTable(TEST_TABLES.schemaNodes, ['schemaId', 'path']);
+  await clearTable(TEST_TABLES.schemaDrafts, ['schemaId', 'revision']);
+  await clearTable(TEST_TABLES.schemaVersions, ['schemaId', 'version']);
   await clearTable(TEST_TABLES.mappings, ['mappingId']);
   await clearTable(TEST_TABLES.schemaMetadata, ['schemaId']);
   await clearTable(TEST_TABLES.projects, ['projectId']);

@@ -10,4 +10,6 @@ export { handler as listMappingRevisionsHandler } from './list-revisions.js';
 export { handler as listMappingVersionsHandler } from './list-versions.js';
 export { handler as previewMappingHandler } from './preview-mapping.js';
 export { handler as saveMappingVersionHandler } from './save-version.js';
+export { handler as schemaUpgradeApplyHandler } from './schema-upgrade-apply.js';
+export { handler as schemaUpgradePreviewHandler } from './schema-upgrade-preview.js';
 export { handler as updateMappingHandler } from './update-mapping.js';

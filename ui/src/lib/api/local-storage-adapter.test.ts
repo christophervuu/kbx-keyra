@@ -197,6 +197,99 @@ describe('LocalStorageAdapter', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
+  it('supports schema draft save/list and explicit version creation with separated readiness statuses', async () => {
+    const adapter = new LocalStorageAdapter();
+    const schema = await adapter.createSchema({
+      name: 'Lifecycle Schema',
+      format: 'json-schema',
+      origin: 'local',
+      content: { type: 'object', properties: { id: { type: 'string' } } },
+    });
+
+    const firstSave = await adapter.saveSchemaDraft(schema.schemaId, {
+      content: { type: 'object', properties: { id: { type: 'string' } } },
+    });
+    expect(firstSave.noChange).toBe(false);
+    expect(firstSave.revision).toBe(1);
+
+    const secondSaveNoChange = await adapter.saveSchemaDraft(schema.schemaId, {
+      content: { type: 'object', properties: { id: { type: 'string' } } },
+      expectedRevision: 1,
+    });
+    expect(secondSaveNoChange.noChange).toBe(true);
+    expect(secondSaveNoChange.revision).toBe(1);
+
+    await adapter.saveSchemaDraft(schema.schemaId, {
+      content: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          amount: { type: 'number' },
+        },
+      },
+      expectedRevision: 1,
+    });
+
+    const revisions = await adapter.listSchemaDraftRevisions(schema.schemaId);
+    expect(revisions.map((entry) => entry.revision)).toEqual([2, 1]);
+
+    const createdVersion = await adapter.createSchemaVersion(schema.schemaId, {
+      expectedDraftRevision: 2,
+      idempotencyKey: 'idem-v1',
+    });
+    expect(createdVersion.noChange).toBe(false);
+    expect(createdVersion.version?.version).toBe(1);
+    expect(createdVersion.version?.versionStatus).toBe('ready');
+    expect(createdVersion.version?.indexStatus).toBe('pending');
+    expect(createdVersion.version?.impactStatus).toBe('pending');
+    expect(createdVersion.version?.sampleValidationStatus).toBe('pending');
+
+    const noChangeVersion = await adapter.createSchemaVersion(schema.schemaId, {
+      expectedDraftRevision: 2,
+      idempotencyKey: 'idem-v2',
+    });
+    expect(noChangeVersion).toEqual({ noChange: true });
+
+    const versions = await adapter.listSchemaVersions(schema.schemaId);
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({ version: 1, versionStatus: 'ready' });
+  });
+
+  it('supports schema sample update and explicit default sample assignment', async () => {
+    const adapter = new LocalStorageAdapter();
+    const schema = await adapter.createSchema({
+      name: 'Samples Schema',
+      format: 'json-schema',
+      origin: 'local',
+      content: { type: 'object' },
+    });
+
+    const first = await adapter.addSchemaSample(schema.schemaId, {
+      sampleName: 'First',
+      sampleContent: { a: 1 },
+    });
+    const second = await adapter.addSchemaSample(schema.schemaId, {
+      sampleName: 'Second',
+      sampleContent: { a: 2 },
+    });
+
+    const updated = await adapter.updateSchemaSample(schema.schemaId, first.sample.sampleId, {
+      sampleName: 'First Updated',
+      sampleContent: { a: 11 },
+    });
+    expect(updated.samplePayloads?.find((entry) => entry.sampleId === first.sample.sampleId)?.name).toBe('First Updated');
+
+    const withDefault = await adapter.setDefaultSchemaSample(schema.schemaId, {
+      sampleId: second.sample.sampleId,
+    });
+    expect(withDefault.defaultSampleId).toBe(second.sample.sampleId);
+
+    const clearedDefault = await adapter.setDefaultSchemaSample(schema.schemaId, {
+      sampleId: null,
+    });
+    expect(clearedDefault.defaultSampleId).toBeUndefined();
+  });
+
   it('updateSchema refreshes updatedAt and sets updatedBy', async () => {
     vi.useFakeTimers();
     try {
@@ -254,9 +347,26 @@ describe('LocalStorageAdapter', () => {
       projectId: project.projectId,
       name: 'Mapping A',
       businessContext: 'Transform source invoice model to target shipment contract.',
-      sourceSchemaRef: SOURCE_SCHEMA_REF,
-      targetSchemaRef: TARGET_SCHEMA_REF,
-      enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+      sourceSchemaRef: {
+        ...SOURCE_SCHEMA_REF,
+        schemaVersion: 1,
+        schemaVersionId: 'sv-source-1',
+        contentHash: 'hash-source-1',
+      },
+      targetSchemaRef: {
+        ...TARGET_SCHEMA_REF,
+        schemaVersion: 2,
+        schemaVersionId: 'sv-target-2',
+        contentHash: 'hash-target-2',
+      },
+      enrichmentSources: [{
+        alias: 'customerProfile',
+        schemaId: 'schema-customer',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-enr-1',
+        contentHash: 'hash-enr-1',
+        required: true,
+      }],
       config: { externalSources: ['legacyAlias'] },
       rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
     });
@@ -267,9 +377,25 @@ describe('LocalStorageAdapter', () => {
     const config = await adapter.getMapping(created.mappingId);
     expect(config.name).toBe('Mapping A');
     expect(config.businessContext).toBe('Transform source invoice model to target shipment contract.');
-    expect(config.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
+    expect(config.sourceSchemaRef).toMatchObject({ schemaVersion: 1, schemaVersionId: 'sv-source-1', contentHash: 'hash-source-1' });
+    expect(config.targetSchemaRef).toMatchObject({ schemaVersion: 2, schemaVersionId: 'sv-target-2', contentHash: 'hash-target-2' });
+    expect(config.enrichmentSources).toEqual([{
+      alias: 'customerProfile',
+      schemaId: 'schema-customer',
+      schemaVersion: 1,
+      schemaVersionId: 'sv-enr-1',
+      contentHash: 'hash-enr-1',
+      required: true,
+    }]);
     expect(config.config.externalSources).toEqual(['customerProfile', 'legacyAlias']);
-    expect(created.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
+    expect(created.enrichmentSources).toEqual([{
+      alias: 'customerProfile',
+      schemaId: 'schema-customer',
+      schemaVersion: 1,
+      schemaVersionId: 'sv-enr-1',
+      contentHash: 'hash-enr-1',
+      required: true,
+    }]);
     expect(created.businessContext).toBe('Transform source invoice model to target shipment contract.');
 
     const updatedConfig: MappingConfig = {
@@ -334,6 +460,71 @@ describe('LocalStorageAdapter', () => {
     expect(config.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
     expect(config.config.externalSources).toEqual(['legacyAlias']);
     expect(created.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
+  });
+
+  it('supports explicit schema-upgrade preview/apply flow semantics in local mode', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Upgrade Mapping',
+      sourceSchemaRef: {
+        schemaId: 'source-schema',
+        type: 'local',
+        schemaVersion: 1,
+        schemaVersionId: 'sv-source-1',
+        contentHash: 'hash-source-1',
+      },
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      rules: [{ target: 'A', type: 'string', expression: 'source("id")' }],
+    });
+
+    const preview = await adapter.previewSchemaUpgrade(created.mappingId, {
+      expectedMappingRevision: 1,
+      role: 'source',
+      destination: {
+        schemaId: 'source-schema',
+        schemaVersion: 2,
+        schemaVersionId: 'sv-source-2',
+        contentHash: 'hash-source-2',
+      },
+    });
+
+    expect(preview.role).toBe('source');
+    expect(preview.to.schemaVersion).toBe(2);
+
+    await expect(
+      adapter.applySchemaUpgrade(created.mappingId, {
+        expectedMappingRevision: 1,
+        previewId: preview.previewId,
+        acceptedSuggestions: [],
+        confirm: false,
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    const applied = await adapter.applySchemaUpgrade(created.mappingId, {
+      expectedMappingRevision: 1,
+      previewId: preview.previewId,
+      acceptedSuggestions: [],
+      confirm: true,
+    });
+
+    expect(applied.mappingId).toBe(created.mappingId);
+    expect(applied.revision).toBe(1);
+    expect(applied.upgradedRole).toBe('source');
+
+    const updatedConfig = await adapter.getMapping(created.mappingId);
+    expect(updatedConfig.version).toBe(1);
+    expect(updatedConfig.sourceSchemaRef).toMatchObject({
+      schemaVersion: 2,
+      schemaVersionId: 'sv-source-2',
+      contentHash: 'hash-source-2',
+    });
   });
 
   it('creates project value table and resolves pinned reference entries', async () => {

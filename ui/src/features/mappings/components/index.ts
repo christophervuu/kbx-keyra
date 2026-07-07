@@ -60,6 +60,7 @@ export { RuleList } from './RuleList';
 export type { RuleListProps } from './RuleList';
 export { AiValidationPanel } from './AiValidationPanel';
 export type { AiValidationPanelProps } from './AiValidationPanel';
+export { SchemaUpgradeStrip } from './SchemaUpgradeStrip';
 export { RuleRow } from './RuleRow';
 export type { RuleRowProps } from './RuleRow';
 export { SourceFieldPicker } from './SourceFieldPicker';

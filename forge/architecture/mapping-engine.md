@@ -915,3 +915,26 @@ The engine tracks compatibility with the DSL specification version:
 - `MappingConfig.engineVersion` declares what DSL version the config was authored against
 - The engine must parse any config authored against an equal or older minor version
 - Major version bumps may require migration (future: `migrate()` utility)
+
+---
+
+## FS-105 schema-impact and upgrade boundary addendum
+
+FS-105 defines mapping-impact and upgrade constraints that interact with, but do not change, core engine purity.
+
+### Impact extraction boundary
+
+- Impact extraction for schema upgrades must use parsed mapping structures (DSL AST/accessor traversal), not raw text search.
+- Role-aware impact classification (source vs target vs enrichment) is required at mapping-domain orchestration level.
+- These contracts are outside `src/engine` execute/validate internals and belong to schema/mapping services that consume parsed artifacts.
+
+### Immutable schema pin compatibility
+
+- Mapping domain now treats schema refs as immutable version pins (`schemaId`, `schemaVersion`, `schemaVersionId`, `contentHash`).
+- Engine remains schema-agnostic at storage/lifecycle level and consumes resolved schema payloads provided by callers.
+
+### Upgrade safety boundary
+
+- No automatic DSL rewrite is performed by engine-side behavior.
+- Upgrade/apply flows remain explicit user/domain operations with preview + acceptance gating in API/UI layers.
+

@@ -1573,6 +1573,80 @@ describe('deployment handlers', () => {
     verifyRuntimeSnapshotReadHashSpy.mockRestore();
   });
 
+  it('runtime execute remains compatible when legacy snapshot metadata lacks schemaRefs but config has immutable pins', async () => {
+    deploymentPersistenceMocks.getActiveSnapshot.mockResolvedValueOnce({
+      mappingId: 'map-1',
+      activeSnapshotId: 'snapshot-legacy-pins',
+      snapshotHash: 'hash-legacy-pins',
+      activatedAt: '2026-06-04T00:00:00.000Z',
+      activatedBy: 'control-plane',
+      sourceType: 'version',
+      sourceNumber: 3,
+    });
+
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        mappingConfig: {
+          name: 'Map',
+          version: 1,
+          engineVersion: '1.0.0',
+          sourceSchemaRef: {
+            schemaId: 'schema-source',
+            type: 'local',
+            schemaVersion: 2,
+            schemaVersionId: 'sv-source-2',
+            contentHash: 'hash-source-2',
+          },
+          targetSchemaRef: {
+            schemaId: 'schema-target',
+            type: 'local',
+            schemaVersion: 3,
+            schemaVersionId: 'sv-target-3',
+            contentHash: 'hash-target-3',
+          },
+          config: {},
+          rules: [],
+        },
+      }),
+    );
+
+    sharedMocks.parseBody.mockReturnValueOnce({ mappingId: 'map-1', sourceData: { a: 1 } });
+    const { handler } = await importRuntimeExecuteHandler();
+
+    const result = await handler({ body: '{}', pathParameters: {} });
+    expect(result.statusCode).toBe(200);
+  });
+
+  it('runtime execute keeps migration-window compatibility for snapshot lacking schema bundle and immutable pins', async () => {
+    deploymentPersistenceMocks.getActiveSnapshot.mockResolvedValueOnce({
+      mappingId: 'map-1',
+      activeSnapshotId: 'snapshot-missing-bundle',
+      snapshotHash: 'hash-missing-bundle',
+      activatedAt: '2026-06-04T00:00:00.000Z',
+      activatedBy: 'control-plane',
+      sourceType: 'version',
+      sourceNumber: 3,
+    });
+
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        mappingConfig: {
+          name: 'Map',
+          version: 1,
+          engineVersion: '1.0.0',
+          config: {},
+          rules: [],
+        },
+      }),
+    );
+
+    sharedMocks.parseBody.mockReturnValueOnce({ mappingId: 'map-1', sourceData: { a: 1 } });
+    const { handler } = await importRuntimeExecuteHandler();
+
+    const result = await handler({ body: '{}', pathParameters: {} });
+    expect(result.statusCode).toBe(200);
+  });
+
   it('runtime deploy handler accepts wrapped artifact payload from control-plane relay', async () => {
     sharedMocks.parseBody.mockReturnValue({
       mappingId: 'map-1',

@@ -33,6 +33,7 @@ const EMPTY_FILTERS: SchemaLibraryFilters = {
   ownerships: [],
   dataFormats: [],
   statuses: [],
+  lifecycles: [],
 };
 
 // ---------------------------------------------------------------------------

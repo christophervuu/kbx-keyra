@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import type { FilterDataFormat, FilterOwnership, FilterStatus } from '../types';
+import type { FilterDataFormat, FilterLifecycle, FilterOwnership, FilterStatus } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -12,9 +12,11 @@ export interface SchemaLibraryFiltersPanelProps {
   ownerships: FilterOwnership[];
   dataFormats: FilterDataFormat[];
   statuses: FilterStatus[];
+  lifecycles: FilterLifecycle[];
   onToggleOwnership: (ownership: FilterOwnership) => void;
   onToggleDataFormat: (format: FilterDataFormat) => void;
   onToggleStatus: (status: FilterStatus) => void;
+  onToggleLifecycle: (lifecycle: FilterLifecycle) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,13 +92,21 @@ const STATUS_OPTIONS: Array<{ value: FilterStatus; label: string }> = [
   { value: 'error', label: 'Error' },
 ];
 
+const LIFECYCLE_OPTIONS: Array<{ value: FilterLifecycle; label: string }> = [
+  { value: 'draft', label: 'Draft only' },
+  { value: 'versioned', label: 'Versioned' },
+  { value: 'archived', label: 'Archived' },
+];
+
 export function SchemaLibraryFiltersPanel({
   ownerships,
   dataFormats,
   statuses,
+  lifecycles,
   onToggleOwnership,
   onToggleDataFormat,
   onToggleStatus,
+  onToggleLifecycle,
 }: SchemaLibraryFiltersPanelProps) {
   return (
     <div className="flex flex-wrap gap-4">
@@ -129,6 +139,17 @@ export function SchemaLibraryFiltersPanel({
             label={label}
             active={statuses.includes(value)}
             onClick={() => onToggleStatus(value)}
+          />
+        ))}
+      </FilterGroup>
+
+      <FilterGroup label="Lifecycle">
+        {LIFECYCLE_OPTIONS.map(({ value, label }) => (
+          <ToggleButton
+            key={value}
+            label={label}
+            active={lifecycles.includes(value)}
+            onClick={() => onToggleLifecycle(value)}
           />
         ))}
       </FilterGroup>

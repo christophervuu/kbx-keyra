@@ -101,6 +101,52 @@ describe('persistence s3/schema-content', () => {
     expect(missing).toBeNull();
   });
 
+  it('putDraftRevision and getDraftRevision store and retrieve draft revision content', async () => {
+    const mod = await importModule();
+
+    s3SendMock.mockResolvedValueOnce({});
+    const key = await mod.putDraftRevision('schema-1', 3, { type: 'object', properties: { id: { type: 'string' } } });
+    expect(key).toBe('schemas/schema-1/drafts/r3.json');
+
+    const putCommand = s3SendMock.mock.calls[0]?.[0] as {
+      input: { Key: string; ContentType: string };
+    };
+    expect(putCommand.input.Key).toBe('schemas/schema-1/drafts/r3.json');
+    expect(putCommand.input.ContentType).toBe('application/json');
+
+    s3SendMock.mockResolvedValueOnce({
+      Body: {
+        transformToString: vi.fn().mockResolvedValue('{"type":"object"}'),
+      },
+    });
+
+    const loaded = await mod.getDraftRevision('schema-1', 3);
+    expect(loaded).toEqual({ type: 'object' });
+  });
+
+  it('putVersion and getVersion store and retrieve immutable version content', async () => {
+    const mod = await importModule();
+
+    s3SendMock.mockResolvedValueOnce({});
+    const key = await mod.putVersion('schema-1', 4, { type: 'object', title: 'Order' });
+    expect(key).toBe('schemas/schema-1/versions/v4.json');
+
+    const putCommand = s3SendMock.mock.calls[0]?.[0] as {
+      input: { Key: string; ContentType: string };
+    };
+    expect(putCommand.input.Key).toBe('schemas/schema-1/versions/v4.json');
+    expect(putCommand.input.ContentType).toBe('application/json');
+
+    s3SendMock.mockResolvedValueOnce({
+      Body: {
+        transformToString: vi.fn().mockResolvedValue('{"title":"Order"}'),
+      },
+    });
+
+    const loaded = await mod.getVersion('schema-1', 4);
+    expect(loaded).toEqual({ title: 'Order' });
+  });
+
   it('delete removes original(json/xsd) and processed objects in one call', async () => {
     s3SendMock.mockResolvedValue({});
     const mod = await importModule();
@@ -129,8 +175,12 @@ describe('persistence s3/schema-content', () => {
 
     expect(mod.schemaContent.putOriginal).toBe(mod.putOriginal);
     expect(mod.schemaContent.putProcessed).toBe(mod.putProcessed);
+    expect(mod.schemaContent.putDraftRevision).toBe(mod.putDraftRevision);
+    expect(mod.schemaContent.putVersion).toBe(mod.putVersion);
     expect(mod.schemaContent.get).toBe(mod.get);
+    expect(mod.schemaContent.getDraftRevision).toBe(mod.getDraftRevision);
     expect(mod.schemaContent.getOriginal).toBe(mod.getOriginal);
+    expect(mod.schemaContent.getVersion).toBe(mod.getVersion);
     expect(mod.schemaContent.delete).toBe(mod.delete);
   });
 });

@@ -273,4 +273,92 @@ describe('persistence schema-nodes', () => {
     expect(firstDeleteBatch.input.RequestItems['keyra-schema-nodes']).toHaveLength(25);
     expect(secondDeleteBatch.input.RequestItems['keyra-schema-nodes']).toHaveLength(5);
   });
+
+  it('writes and queries schema node identity sidecar records', async () => {
+    sendMock
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        Items: [
+          {
+            schemaId: 'IDENTITY#version-1',
+            path: '',
+            schemaVersionId: 'version-1',
+            fieldId: 'fid-root',
+            jsonPointer: '',
+          },
+          {
+            schemaId: 'IDENTITY#version-1',
+            path: '/properties/id',
+            schemaVersionId: 'version-1',
+            fieldId: 'fid-id',
+            jsonPointer: '/properties/id',
+            parentFieldId: 'fid-root',
+          },
+        ],
+      });
+
+    const mod = await importModule();
+    await mod.putSchemaNodeIdentity({
+      schemaVersionId: 'version-1',
+      fieldId: 'fid-root',
+      jsonPointer: '',
+    });
+
+    const identities = await mod.listSchemaNodeIdentities('version-1');
+    expect(identities).toHaveLength(2);
+    expect(identities[1]).toEqual({
+      schemaVersionId: 'version-1',
+      fieldId: 'fid-id',
+      jsonPointer: '/properties/id',
+      parentFieldId: 'fid-root',
+    });
+  });
+
+  it('batch writes identity sidecar records with schemaVersion partition', async () => {
+    sendMock.mockResolvedValue({ UnprocessedItems: {} });
+    const mod = await importModule();
+
+    await mod.batchWriteSchemaNodeIdentities('version-2', [
+      {
+        schemaVersionId: 'ignored-by-call',
+        fieldId: 'fid-root',
+        jsonPointer: '',
+      },
+      {
+        schemaVersionId: 'ignored-by-call',
+        fieldId: 'fid-id',
+        jsonPointer: '/properties/id',
+        parentFieldId: 'fid-root',
+      },
+    ]);
+
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const command = sendMock.mock.calls[0]?.[0] as {
+      input: { RequestItems: Record<string, Array<{ PutRequest: { Item: Record<string, unknown> } }>> };
+    };
+    const items = command.input.RequestItems['keyra-schema-nodes'].map((entry) => entry.PutRequest.Item);
+    expect(items[0]?.schemaId).toBe('IDENTITY#version-2');
+    expect(items[1]?.schemaVersionId).toBe('version-2');
+  });
+
+  it('gets single schema node identity by schemaVersionId + pointer', async () => {
+    sendMock.mockResolvedValueOnce({
+      Item: {
+        schemaId: 'IDENTITY#version-3',
+        path: '/properties/code',
+        schemaVersionId: 'version-3',
+        fieldId: 'fid-code',
+        jsonPointer: '/properties/code',
+      },
+    });
+
+    const mod = await importModule();
+    const found = await mod.getSchemaNodeIdentity('version-3', '/properties/code');
+
+    expect(found).toEqual({
+      schemaVersionId: 'version-3',
+      fieldId: 'fid-code',
+      jsonPointer: '/properties/code',
+    });
+  });
 });

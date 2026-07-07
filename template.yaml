@@ -1195,7 +1195,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps
+            Path: /projects/{id}/value-maps
             Method: get
 
   LinkProjectValueMapFunction:
@@ -1226,7 +1226,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps/link
+            Path: /projects/{id}/value-maps/link
             Method: post
 
   PromoteProjectValueMapFunction:
@@ -1261,7 +1261,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps/{valueTableId}/promote
+            Path: /projects/{id}/value-maps/{valueTableId}/promote
             Method: post
 
   GetProjectValueMapDetailFunction:
@@ -1290,7 +1290,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps/{valueTableId}
+            Path: /projects/{id}/value-maps/{valueTableId}
             Method: get
 
   UpdateProjectValueMapOverlayFunction:
@@ -1317,13 +1317,13 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps/{valueTableId}/overlay
+            Path: /projects/{id}/value-maps/{valueTableId}/overlay
             Method: put
         ApiEventAlias:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-tables/{valueTableId}/overlay
+            Path: /projects/{id}/value-tables/{valueTableId}/overlay
             Method: put
 
   ReviewProjectValueMapUpdateFunction:
@@ -1352,7 +1352,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps/{valueTableId}/review-update
+            Path: /projects/{id}/value-maps/{valueTableId}/review-update
             Method: post
 
   AcceptProjectValueMapUpdateFunction:
@@ -1383,7 +1383,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps/{valueTableId}/accept-update
+            Path: /projects/{id}/value-maps/{valueTableId}/accept-update
             Method: post
 
   UnlinkProjectValueMapFunction:
@@ -1416,7 +1416,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /projects/{projectId}/value-maps/{valueTableId}/link
+            Path: /projects/{id}/value-maps/{valueTableId}/link
             Method: delete
 
   ListGlobalValueMapsFunction:
@@ -1509,12 +1509,6 @@ Resources:
             RestApiId: !Ref KeyraApi
             Path: /value-maps/{valueTableId}
             Method: get
-        ApiEventAlias:
-          Type: Api
-          Properties:
-            RestApiId: !Ref KeyraApi
-            Path: /value-tables/{valueTableId}
-            Method: get
 
   CreateGlobalValueMapRevisionFunction:
     Type: AWS::Serverless::Function
@@ -1543,12 +1537,6 @@ Resources:
           Properties:
             RestApiId: !Ref KeyraApi
             Path: /value-maps/{valueTableId}/revisions
-            Method: post
-        ApiEventAlias:
-          Type: Api
-          Properties:
-            RestApiId: !Ref KeyraApi
-            Path: /value-tables/{valueTableId}/revisions
             Method: post
 
   ListGlobalValueMapRevisionsFunction:
@@ -1612,12 +1600,6 @@ Resources:
             RestApiId: !Ref KeyraApi
             Path: /value-maps/{valueTableId}/revisions/{revision}
             Method: get
-        ApiEventAlias:
-          Type: Api
-          Properties:
-            RestApiId: !Ref KeyraApi
-            Path: /value-tables/{valueTableId}/revisions/{revision}
-            Method: get
 
   ArchiveGlobalValueMapFunction:
     Type: AWS::Serverless::Function
@@ -1642,12 +1624,6 @@ Resources:
           Properties:
             RestApiId: !Ref KeyraApi
             Path: /value-maps/{valueTableId}/archive
-            Method: post
-        ApiEventAlias:
-          Type: Api
-          Properties:
-            RestApiId: !Ref KeyraApi
-            Path: /value-tables/{valueTableId}/archive
             Method: post
 
   ListGlobalValueMapUsageFunction:
@@ -1679,12 +1655,6 @@ Resources:
           Properties:
             RestApiId: !Ref KeyraApi
             Path: /value-maps/{valueTableId}/usage
-            Method: get
-        ApiEventAlias:
-          Type: Api
-          Properties:
-            RestApiId: !Ref KeyraApi
-            Path: /value-tables/{valueTableId}/usage
             Method: get
 
   ListVersionsFunction:
@@ -1858,6 +1828,70 @@ Resources:
           Properties:
             RestApiId: !Ref KeyraApi
             Path: /mappings/{mappingId}/preview
+            Method: post
+
+  MappingSchemaUpgradePreviewFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-mappingschemaupgradepreview
+      CodeUri: .
+      Handler: src/lambda/mapping/schema-upgrade-preview.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/schema-upgrade/preview
+            Method: post
+
+  MappingSchemaUpgradeApplyFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-mappingschemaupgradeapply
+      CodeUri: .
+      Handler: src/lambda/mapping/schema-upgrade-apply.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/schema-upgrade/apply
             Method: post
 
   DeployMappingFunction:

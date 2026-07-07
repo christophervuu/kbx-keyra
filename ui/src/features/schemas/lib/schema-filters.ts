@@ -25,7 +25,13 @@ export function filterSchemas(
   items: SchemaLibraryItem[],
   filters: SchemaLibraryFilters,
 ): SchemaLibraryItem[] {
-  const { search, ownerships, dataFormats, statuses } = filters;
+  const {
+    search,
+    ownerships,
+    dataFormats,
+    statuses,
+    lifecycles = [],
+  } = filters;
   const term = search.trim().toLowerCase();
 
   return items.filter((item) => {
@@ -44,6 +50,9 @@ export function filterSchemas(
 
     // Status filter (OR within, skip if empty)
     if (statuses.length > 0 && !statuses.includes(item.status)) return false;
+
+    // Lifecycle filter (OR within, skip if empty)
+    if (lifecycles.length > 0 && !lifecycles.includes(item.lifecycle)) return false;
 
     return true;
   });

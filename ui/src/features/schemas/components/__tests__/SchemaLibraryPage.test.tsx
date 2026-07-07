@@ -471,6 +471,46 @@ describe('SchemaLibraryPage', () => {
     });
   });
 
+  it('supports lifecycle filter options and filtering behavior', async () => {
+    const listSchemaVersions = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          schemaId: 's-2',
+          version: 1,
+          schemaVersionId: 'sv-2',
+          draftRevision: 1,
+          basedOnVersion: null,
+          contentHash: 'hash-2',
+          versionStatus: 'ready',
+          indexStatus: 'ready',
+          impactStatus: 'ready',
+          sampleValidationStatus: 'ready',
+          createdAt: '2026-01-01T00:00:00Z',
+          createdBy: 'local-user',
+        },
+      ]);
+
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([
+        makeSchemaMeta({ schemaId: 's-1', name: 'Draft Schema' }),
+        makeSchemaMeta({ schemaId: 's-2', name: 'Versioned Schema' }),
+      ]),
+      listProjects: vi.fn().mockResolvedValue([]),
+      listSchemaVersions,
+    });
+    renderPage(adapter);
+
+    await waitFor(() => expect(screen.getAllByTestId('schema-library-card')).toHaveLength(2));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Versioned' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('schema-library-card')).toHaveLength(1);
+      expect(screen.getByText('Versioned Schema')).toBeInTheDocument();
+    });
+  });
+
   // -------------------------------------------------------------------------
   // Sort interaction
   // -------------------------------------------------------------------------

@@ -69,6 +69,39 @@ const UPLOADED_SCHEMA: SchemaDetail = {
   },
 };
 
+const VERSIONED_SCHEMA: SchemaDetail = {
+  ...UPLOADED_SCHEMA,
+  metadata: {
+    ...UPLOADED_SCHEMA.metadata,
+    schemaId: 'schema-versioned-1',
+    name: 'Versioned Schema',
+    samplePayloadCount: 2,
+    samplePayloads: [
+      {
+        sampleId: 'sample-default',
+        schemaId: 'schema-versioned-1',
+        name: 'Default sample',
+        dataFormat: 'json',
+        contentRef: 'schemas/schema-versioned-1/samples/sample-default/payload.json',
+        usedForInference: false,
+        source: 'added_sample',
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+      {
+        sampleId: 'sample-other',
+        schemaId: 'schema-versioned-1',
+        name: 'Other sample',
+        dataFormat: 'json',
+        contentRef: 'schemas/schema-versioned-1/samples/sample-other/payload.json',
+        usedForInference: false,
+        source: 'added_sample',
+        createdAt: '2026-04-02T00:00:00Z',
+      },
+    ],
+    defaultSampleId: 'sample-default',
+  },
+};
+
 const INFERRED_XML_SCHEMA: SchemaDetail = {
   metadata: {
     schemaId: 'schema-inferred-xml-1',
@@ -115,6 +148,21 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     updateSchema: vi.fn().mockImplementation((_id, input) =>
       Promise.resolve({ ...UPLOADED_SCHEMA.metadata, ...input }),
     ),
+    saveSchemaDraft: vi.fn().mockResolvedValue({
+      noChange: false,
+      revision: 1,
+      draft: {
+        schemaId: 'schema-uploaded-1',
+        revision: 1,
+        basedOnVersion: null,
+        contentHash: 'hash-draft-1',
+        savedAt: '2026-06-01T00:00:00Z',
+        savedBy: 'local-user',
+      },
+    }),
+    listSchemaDraftRevisions: vi.fn().mockResolvedValue([]),
+    createSchemaVersion: vi.fn().mockResolvedValue({ noChange: false }),
+    listSchemaVersions: vi.fn().mockResolvedValue([]),
     markSchemaReviewed: vi.fn().mockResolvedValue({ ...UPLOADED_SCHEMA.metadata, status: 'ready' }),
     addSchemaSample: vi.fn().mockResolvedValue({
       sample: {
@@ -924,6 +972,155 @@ describe('SchemaDetailPage', () => {
 
     expect(screen.queryByTestId('sample-row-sample-x')).not.toBeInTheDocument();
     expect(screen.queryByTestId('schema-node-sample-value-name')).not.toBeInTheDocument();
+  });
+
+  it('shows draft/version controls and create-version action', async () => {
+    const createSchemaVersion = vi.fn().mockResolvedValue({ noChange: false });
+    adapter = createMockAdapter({
+      getSchema: vi.fn().mockResolvedValue(VERSIONED_SCHEMA),
+      listSchemaVersions: vi.fn().mockResolvedValue([
+        {
+          schemaId: 'schema-versioned-1',
+          version: 1,
+          schemaVersionId: 'sv-1',
+          draftRevision: 2,
+          basedOnVersion: null,
+          contentHash: 'hash-v1',
+          versionStatus: 'ready',
+          indexStatus: 'ready',
+          impactStatus: 'ready',
+          sampleValidationStatus: 'ready',
+          createdAt: '2026-04-03T00:00:00Z',
+          createdBy: 'local-user',
+        },
+      ]),
+      listSchemaDraftRevisions: vi.fn().mockResolvedValue([
+        {
+          schemaId: 'schema-versioned-1',
+          revision: 3,
+          basedOnVersion: 1,
+          contentHash: 'hash-d3',
+          savedAt: '2026-04-04T00:00:00Z',
+          savedBy: 'local-user',
+        },
+      ]),
+      createSchemaVersion,
+    });
+
+    const user = userEvent.setup();
+    renderPage(adapter, 'schema-versioned-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-version-controls')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('schema-draft-indicator')).toHaveTextContent('Draft based on v1');
+    await user.click(screen.getByTestId('schema-create-version-button'));
+
+    await waitFor(() => {
+      expect(createSchemaVersion).toHaveBeenCalledWith('schema-versioned-1', { expectedDraftRevision: 3 });
+    });
+  });
+
+  it('add-field dialog validates before insertion', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter, 'schema-uploaded-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('add-field-dialog-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('add-field-dialog-trigger'));
+    expect(screen.getByTestId('add-field-dialog')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('add-field-submit'));
+    expect(screen.getByTestId('add-field-error')).toHaveTextContent('Field name is required.');
+
+    await user.type(screen.getByTestId('add-field-name-input'), 'customerId');
+    await user.click(screen.getByTestId('add-field-submit'));
+
+    await waitFor(() => {
+      expect(adapter.updateSchema).toHaveBeenCalled();
+    });
+  });
+
+  it('sample fallback messaging and default deletion guidance are visible', async () => {
+    const user = userEvent.setup();
+    adapter = createMockAdapter({
+      getSchema: vi.fn().mockResolvedValue(VERSIONED_SCHEMA),
+      setDefaultSchemaSample: vi.fn().mockResolvedValue(VERSIONED_SCHEMA.metadata),
+      listProjects: vi.fn().mockResolvedValue([
+        { projectId: 'project-1', name: 'Project One', description: '', slug: 'project-one', updatedAt: '2026-04-04T00:00:00Z' },
+      ]),
+      getProject: vi.fn().mockResolvedValue({
+        projectId: 'project-1',
+        name: 'Project One',
+        description: '',
+        slug: 'project-one',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-04-04T00:00:00Z',
+        schemaRefs: [{ schemaId: 'schema-versioned-1', type: 'local' }],
+        mappings: [],
+      }),
+      listMappings: vi.fn().mockResolvedValue([
+        {
+          mappingId: 'map-1',
+          projectId: 'project-1',
+          name: 'Mapping One',
+          version: 1,
+          status: 'draft',
+          sourceSchemaId: 'schema-versioned-1',
+          targetSchemaId: 'schema-target-1',
+          ruleCount: 1,
+          coverage: 100,
+          updatedAt: '2026-04-04T00:00:00Z',
+        },
+      ]),
+      deleteSchemaSample: vi.fn().mockResolvedValue({
+        ...VERSIONED_SCHEMA.metadata,
+        samplePayloads: VERSIONED_SCHEMA.metadata.samplePayloads?.filter((sample) => sample.sampleId !== 'sample-default') ?? [],
+        samplePayloadCount: 1,
+        defaultSampleId: undefined,
+      }),
+    });
+
+    renderPage(adapter, 'schema-versioned-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sample-precedence-message')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('sample-precedence-message')).toHaveTextContent('No mapping-selected sample. Using schema default sample.');
+
+    await user.click(screen.getByTestId('sample-delete-sample-default'));
+    expect(screen.getByTestId('delete-default-sample-message')).toBeInTheDocument();
+    expect(screen.getByTestId('delete-sample-affected-mappings')).toBeInTheDocument();
+  });
+
+  it('XSD edit-unavailable messaging is explicit', async () => {
+    adapter = createMockAdapter({ getSchema: vi.fn().mockResolvedValue(INFERRED_XML_SCHEMA) });
+    renderPage(adapter, 'schema-inferred-xml-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('xsd-edit-unavailable-message')).toBeInTheDocument();
+    });
+  });
+
+  it('archive warning is shown for archived schema families', async () => {
+    const archivedSchema: SchemaDetail = {
+      ...UPLOADED_SCHEMA,
+      metadata: {
+        ...UPLOADED_SCHEMA.metadata,
+        schemaId: 'schema-archived-1',
+        archived: true as unknown as never,
+      } as SchemaDetail['metadata'],
+    };
+    adapter = createMockAdapter({ getSchema: vi.fn().mockResolvedValue(archivedSchema) });
+    renderPage(adapter, 'schema-archived-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-archived-warning')).toBeInTheDocument();
+    });
   });
 
   it('add-sample flow provides explicit action choices and does not auto-mutate without apply-all', async () => {

@@ -457,3 +457,36 @@ FS-101 adds async Auto-Map session/run infrastructure contracts.
 - Session/run handlers require scoped read/write access to `AutoMapTable` and relevant indexes.
 - Auto-Map worker/orchestrator requires scoped state-machine start permissions and table writes for run/work-unit/suggestion progression.
 - Cross-service permissions remain bounded to Auto-Map resources; no broad wildcard escalation is required by FS-101 contracts.
+
+---
+
+## 17) FS-105 schema lifecycle infrastructure addendum
+
+FS-105 introduces infrastructure-level constraints for schema lifecycle orchestration and migration.
+
+### 17.1 Async post-version processing boundary
+
+Infrastructure should support asynchronous post-version operations (indexing, impact materialization, compatibility recalculation) independent from immutable version commit completion.
+
+Operational contract:
+
+- immutable version readiness is committed before downstream derived tasks complete,
+- downstream failures update dedicated status surfaces and trigger retry/recovery paths without rewriting committed immutable version identity.
+
+### 17.2 CDM sync compatibility
+
+CDM ingestion infrastructure remains read-only GitHub integration. FS-105 does not reintroduce non-CDM user-schema Git publish/sync infrastructure dependencies.
+
+### 17.3 Migration execution posture
+
+FS-105 migration/backfill execution should run with:
+
+- idempotent/restartable job posture,
+- dry-run/report mode support,
+- per-record failure reporting,
+- parity-validation support before destructive cleanup.
+
+### 17.4 Deployment artifact storage compatibility
+
+Infrastructure must preserve immutable schema artifact references in deployment snapshots and runtime-local artifact storage so deploy/promote/rollback remain reproducible across later schema lifecycle changes.
+

@@ -14,6 +14,8 @@ interface SchemaSamplePayloadsSectionProps {
   metadata: SchemaMetadata;
   onAddSample: (input: { sampleName?: string; sampleContent: unknown; applySuggestedUpdates?: boolean }) => Promise<AddSchemaSampleResult>;
   onDeleteSample?: (sampleId: string) => Promise<void>;
+  onSetDefaultSample?: (sampleId: string | null) => Promise<void>;
+  mappingDefaultSampleUsageCount?: number;
   onLoadSamplePayload?: (sampleId: string) => Promise<SchemaSamplePayloadContent>;
   initialSamplePayload?: unknown;
   onSelectedSamplePayloadChange?: (sampleId: string | null, payload: unknown | null) => void;
@@ -47,6 +49,8 @@ export function SchemaSamplePayloadsSection({
   metadata,
   onAddSample,
   onDeleteSample,
+  onSetDefaultSample,
+  mappingDefaultSampleUsageCount = 0,
   onLoadSamplePayload,
   initialSamplePayload,
   onSelectedSamplePayloadChange,
@@ -62,6 +66,7 @@ export function SchemaSamplePayloadsSection({
   const [viewingSampleId, setViewingSampleId] = useState<string | null>(null);
   const [deleteConfirmSample, setDeleteConfirmSample] = useState<SchemaSamplePayloadMetadata | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSettingDefault, setIsSettingDefault] = useState(false);
   const [loadingSampleIds, setLoadingSampleIds] = useState<Set<string>>(new Set());
   const [viewError, setViewError] = useState<string | null>(null);
 
@@ -93,6 +98,24 @@ export function SchemaSamplePayloadsSection({
 
     return null;
   }, [selectedSample, cachedSamplePayloads, initialSamplePayload]);
+
+  const defaultSampleId = metadata.defaultSampleId ?? null;
+
+  const selectedSamplePrecedenceLabel = useMemo(() => {
+    if (effectiveSelectedSampleId != null) {
+      return 'Using mapping-selected sample (highest precedence).';
+    }
+
+    if (defaultSampleId) {
+      return 'No mapping-selected sample. Using schema default sample.';
+    }
+
+    if (visibleSamples.length > 0) {
+      return 'No mapping-selected or default sample. Using first compatible sample when available.';
+    }
+
+    return 'No mapping-selected sample, no schema default sample, and no compatible samples available.';
+  }, [defaultSampleId, effectiveSelectedSampleId, visibleSamples.length]);
 
   useEffect(() => {
     onSelectedSamplePayloadChange?.(selectedSample?.sampleId ?? null, resolvedSelectedPayload);
@@ -185,6 +208,12 @@ export function SchemaSamplePayloadsSection({
         setSelectedSampleId(null);
       }
 
+      if (metadata.defaultSampleId === deleteConfirmSample.sampleId && typeof onSetDefaultSample === 'function') {
+        const remaining = (metadata.samplePayloads ?? []).filter((sample) => sample.sampleId !== deleteConfirmSample.sampleId);
+        const replacement = remaining[0]?.sampleId ?? null;
+        await onSetDefaultSample(replacement);
+      }
+
       if (viewingSampleId === deleteConfirmSample.sampleId) {
         setViewingSampleId(null);
       }
@@ -194,6 +223,23 @@ export function SchemaSamplePayloadsSection({
       setError(err instanceof Error ? err.message : 'Failed to delete sample payload.');
     } finally {
       setIsDeleting(false);
+    }
+  }
+
+  async function setDefault(sampleId: string | null) {
+    if (typeof onSetDefaultSample !== 'function') {
+      setError('Setting default sample is not available in this mode.');
+      return;
+    }
+
+    setError(null);
+    setIsSettingDefault(true);
+    try {
+      await onSetDefaultSample(sampleId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update default sample.');
+    } finally {
+      setIsSettingDefault(false);
     }
   }
 
@@ -243,6 +289,10 @@ export function SchemaSamplePayloadsSection({
           Add sample
         </Button>
       </div>
+
+      <p data-testid="sample-precedence-message" className="mb-3 text-xs text-slate-400">
+        {selectedSamplePrecedenceLabel}
+      </p>
 
       {visibleSamples.length === 0 ? (
         <p data-testid="sample-empty" className="text-sm text-slate-500">
@@ -306,6 +356,21 @@ export function SchemaSamplePayloadsSection({
                       title="View raw payload"
                     >
                       <Eye size={14} aria-hidden="true" />
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      data-testid={`sample-default-${sample.sampleId}`}
+                      onClick={() => {
+                        const nextDefault = defaultSampleId === sample.sampleId ? null : sample.sampleId;
+                        void setDefault(nextDefault);
+                      }}
+                      aria-label={defaultSampleId === sample.sampleId ? `Clear default for ${sample.name}` : `Set ${sample.name} as default`}
+                      title={defaultSampleId === sample.sampleId ? 'Clear default sample' : 'Set as default sample'}
+                      disabled={isSettingDefault}
+                    >
+                      {defaultSampleId === sample.sampleId ? 'Default' : 'Set default'}
                     </Button>
 
                     <Button
@@ -405,6 +470,16 @@ export function SchemaSamplePayloadsSection({
             <p className="mt-2 text-sm text-slate-400">
               This will permanently remove <span className="font-medium text-slate-200">{deleteConfirmSample.name}</span>.
             </p>
+            {metadata.defaultSampleId === deleteConfirmSample.sampleId ? (
+              <p className="mt-2 text-xs text-amber-300" data-testid="delete-default-sample-message">
+                This sample is currently the schema default. Deleting it will choose a replacement default when possible, otherwise clear the default.
+              </p>
+            ) : null}
+            {mappingDefaultSampleUsageCount > 0 ? (
+              <p className="mt-2 text-xs text-slate-400" data-testid="delete-sample-affected-mappings">
+                {mappingDefaultSampleUsageCount} mapping preference{mappingDefaultSampleUsageCount === 1 ? '' : 's'} may fall back to the schema default or next compatible sample.
+              </p>
+            ) : null}
 
             <div className="mt-4 flex items-center justify-end gap-2">
               <Button

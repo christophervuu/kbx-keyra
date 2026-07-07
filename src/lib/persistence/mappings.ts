@@ -94,6 +94,9 @@ function normalizeEnrichmentSources(
   return value.map((source) => ({
     alias: source.alias,
     ...(source.schemaId ? { schemaId: source.schemaId } : {}),
+    ...(typeof source.schemaVersion === 'number' ? { schemaVersion: source.schemaVersion } : {}),
+    ...(source.schemaVersionId ? { schemaVersionId: source.schemaVersionId } : {}),
+    ...(source.contentHash ? { contentHash: source.contentHash } : {}),
     ...(source.required !== undefined ? { required: source.required } : {}),
     ...(source.description ? { description: source.description } : {}),
   }));

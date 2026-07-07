@@ -467,6 +467,19 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('page-sample-slot')).toBeInTheDocument();
   });
 
+  it('renders schema upgrade strip slot when provided', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        schemaUpgradeContent={<div data-testid="schema-upgrade-slot">Upgrade</div>}
+      />,
+    );
+
+    expect(screen.getByTestId('schema-upgrade-content')).toBeInTheDocument();
+    expect(screen.getByTestId('schema-upgrade-slot')).toBeInTheDocument();
+  });
+
   it('wires Browse Inputs button pressed state through props', () => {
     renderWithRouter(
       <MappingEditorPage

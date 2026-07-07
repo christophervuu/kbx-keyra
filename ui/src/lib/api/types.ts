@@ -57,24 +57,35 @@ import type {
   ImportProjectValueMapPortableInput,
   ImportProjectValueMapPortableResult,
   ValueMapUsageSummary,
-  PublishSchemaInput,
+  CreateSchemaVersionInput,
+  CreateSchemaVersionResult,
   SchemaDetail,
+  SchemaDraftRevision,
   SchemaMetadata,
   SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
   ServerPreviewResult,
+  SetDefaultSchemaSampleInput,
   SmartFixInput,
   SmartFixResult,
+  SaveSchemaDraftInput,
+  SaveSchemaDraftResult,
   SuggestExpressionInput,
   SuggestExpressionResult,
   TemplateDetail,
   TemplateMetadata,
+  UpdateSchemaSampleInput,
   UpdateSchemaInput,
   UpdateProjectInput,
   ValidateMappingsInput,
   ValidationReport,
+  SchemaVersionEntry,
+  MappingSchemaUpgradeApplyInput,
+  MappingSchemaUpgradeApplyResult,
+  MappingSchemaUpgradePreviewInput,
+  MappingSchemaUpgradePreviewResult,
 } from '@/lib/types';
 
 export type DeploymentSourceType = 'revision' | 'version';
@@ -224,8 +235,14 @@ export interface ApiAdapter {
   getSchema(id: string): Promise<SchemaDetail>;
   createSchema(input: CreateSchemaInput): Promise<SchemaMetadata>;
   updateSchema(id: string, input: UpdateSchemaInput): Promise<SchemaMetadata>;
+  saveSchemaDraft?(id: string, input: SaveSchemaDraftInput): Promise<SaveSchemaDraftResult>;
+  listSchemaDraftRevisions?(id: string): Promise<SchemaDraftRevision[]>;
+  createSchemaVersion?(id: string, input: CreateSchemaVersionInput): Promise<CreateSchemaVersionResult>;
+  listSchemaVersions?(id: string): Promise<SchemaVersionEntry[]>;
   markSchemaReviewed?(id: string): Promise<SchemaMetadata>;
   addSchemaSample?(id: string, input: AddSchemaSampleInput): Promise<AddSchemaSampleResult>;
+  updateSchemaSample?(id: string, sampleId: string, input: UpdateSchemaSampleInput): Promise<SchemaMetadata>;
+  setDefaultSchemaSample?(id: string, input: SetDefaultSchemaSampleInput): Promise<SchemaMetadata>;
   deleteSchemaSample?(id: string, sampleId: string): Promise<SchemaMetadata>;
   getSchemaSamplePayload?(id: string, sampleId: string): Promise<SchemaSamplePayloadContent>;
   deleteSchema(id: string): Promise<void>;
@@ -238,6 +255,14 @@ export interface ApiAdapter {
   saveMapping(id: string, config: MappingConfig): Promise<MappingSaveResult>;
   deleteMapping(id: string): Promise<void>;
   duplicateMapping(id: string, newName: string): Promise<MappingMetadata>;
+  previewSchemaUpgrade?(
+    mappingId: string,
+    input: MappingSchemaUpgradePreviewInput,
+  ): Promise<MappingSchemaUpgradePreviewResult>;
+  applySchemaUpgrade?(
+    mappingId: string,
+    input: MappingSchemaUpgradeApplyInput,
+  ): Promise<MappingSchemaUpgradeApplyResult>;
   importLocalMappings?(projectId: string): Promise<MappingImportSummary>;
 
   // Version History
@@ -323,10 +348,10 @@ export interface ApiAdapter {
     },
   ): Promise<SchemaSyncResult>;
 
-  // GitHub: Non-CDM Repo (read-write)
-  listPublishedSchemas(path?: string): Promise<GitHubFile[]>;
-  publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void>;
-  linkPublishedSchema(input: LinkPublishedSchemaInput): Promise<SchemaMetadata>;
+  // GitHub: Non-CDM Repo (retired in FS-105; compatibility-only, no canonical usage)
+  listPublishedSchemas?(path?: string): Promise<GitHubFile[]>;
+  publishSchemaToGitHub?(schemaId: string, input: { repo: string; branch: string; path: string; commitMessage?: string }): Promise<void>;
+  linkPublishedSchema?(input: LinkPublishedSchemaInput): Promise<SchemaMetadata>;
 
   // AI
   autoMap(input: AutoMapInput): Promise<AutoMapResult>;

@@ -1,6 +1,6 @@
 // ActiveFilterChips — Displays active filter values as removable chips (FS-016 T-03)
 
-import type { FilterDataFormat, FilterOwnership, FilterStatus } from '../types';
+import type { FilterDataFormat, FilterLifecycle, FilterOwnership, FilterStatus } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -10,9 +10,11 @@ export interface ActiveFilterChipsProps {
   ownerships: FilterOwnership[];
   dataFormats: FilterDataFormat[];
   statuses: FilterStatus[];
+  lifecycles: FilterLifecycle[];
   onRemoveOwnership: (ownership: FilterOwnership) => void;
   onRemoveDataFormat: (format: FilterDataFormat) => void;
   onRemoveStatus: (status: FilterStatus) => void;
+  onRemoveLifecycle: (lifecycle: FilterLifecycle) => void;
   onClearAll: () => void;
 }
 
@@ -67,6 +69,25 @@ function statusLabel(status: FilterStatus): string {
   return displayStatus[0].toUpperCase() + displayStatus.slice(1);
 }
 
+const LIFECYCLE_COLORS: Record<FilterLifecycle, string> = {
+  draft: 'bg-indigo-200 text-indigo-900',
+  versioned: 'bg-cyan-200 text-cyan-900',
+  archived: 'bg-amber-200 text-amber-900',
+};
+
+function lifecycleLabel(lifecycle: FilterLifecycle): string {
+  switch (lifecycle) {
+    case 'draft':
+      return 'Draft only';
+    case 'versioned':
+      return 'Versioned';
+    case 'archived':
+      return 'Archived';
+    default:
+      return lifecycle;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ActiveFilterChips
 // ---------------------------------------------------------------------------
@@ -75,12 +96,14 @@ export function ActiveFilterChips({
   ownerships,
   dataFormats,
   statuses,
+  lifecycles,
   onRemoveOwnership,
   onRemoveDataFormat,
   onRemoveStatus,
+  onRemoveLifecycle,
   onClearAll,
 }: ActiveFilterChipsProps) {
-  const hasAny = ownerships.length > 0 || dataFormats.length > 0 || statuses.length > 0;
+  const hasAny = ownerships.length > 0 || dataFormats.length > 0 || statuses.length > 0 || lifecycles.length > 0;
 
   if (!hasAny) return null;
 
@@ -113,6 +136,15 @@ export function ActiveFilterChips({
           label={statusLabel(status)}
           onRemove={() => onRemoveStatus(status)}
           colorClass={STATUS_COLORS[status]}
+        />
+      ))}
+
+      {lifecycles.map((lifecycle) => (
+        <Chip
+          key={`lifecycle-${lifecycle}`}
+          label={lifecycleLabel(lifecycle)}
+          onRemove={() => onRemoveLifecycle(lifecycle)}
+          colorClass={LIFECYCLE_COLORS[lifecycle]}
         />
       ))}
 

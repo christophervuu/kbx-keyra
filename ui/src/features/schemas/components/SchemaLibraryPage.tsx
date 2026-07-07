@@ -33,6 +33,7 @@ export function SchemaLibraryPage() {
     toggleOwnershipFilter,
     toggleDataFormatFilter,
     toggleStatusFilter,
+    toggleLifecycleFilter,
     setSort,
     viewMode,
     setViewMode,
@@ -214,7 +215,8 @@ export function SchemaLibraryPage() {
     filters.search.length > 0
     || filters.ownerships.length > 0
     || filters.dataFormats.length > 0
-    || filters.statuses.length > 0;
+    || filters.statuses.length > 0
+    || filters.lifecycles.length > 0;
 
   return (
     <div data-testid="page-schema-library" className="flex flex-col gap-6 p-6">
@@ -261,18 +263,22 @@ export function SchemaLibraryPage() {
           ownerships={filters.ownerships}
           dataFormats={filters.dataFormats}
           statuses={filters.statuses}
+          lifecycles={filters.lifecycles}
           onToggleOwnership={toggleOwnershipFilter}
           onToggleDataFormat={toggleDataFormatFilter}
           onToggleStatus={toggleStatusFilter}
+          onToggleLifecycle={toggleLifecycleFilter}
         />
 
         <ActiveFilterChips
           ownerships={filters.ownerships}
           dataFormats={filters.dataFormats}
           statuses={filters.statuses}
+          lifecycles={filters.lifecycles}
           onRemoveOwnership={toggleOwnershipFilter}
           onRemoveDataFormat={toggleDataFormatFilter}
           onRemoveStatus={toggleStatusFilter}
+          onRemoveLifecycle={toggleLifecycleFilter}
           onClearAll={clearFilters}
         />
       </div>

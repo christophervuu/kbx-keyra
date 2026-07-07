@@ -147,6 +147,8 @@ describe('SchemaActions', () => {
 
     expect(screen.getByTestId('action-view-raw')).toHaveTextContent('View raw');
     expect(screen.getByTestId('action-remove')).toHaveTextContent('Delete schema');
+    expect(screen.queryByRole('menuitem', { name: /publish/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /sync/i })).not.toBeInTheDocument();
   });
 
   it('CDM schema renders overflow only with View raw', async () => {

@@ -28,6 +28,10 @@ function makeItem(overrides: Partial<SchemaLibraryItem> = {}): SchemaLibraryItem
     syncStatus: 'local',
     projectCount: 1,
     projectNames: ['A'],
+    lifecycle: 'draft',
+    latestVersion: 0,
+    draftRevision: null,
+    archived: false,
     updatedAt: '2026-01-01T00:00:00Z',
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -49,6 +53,7 @@ describe('SchemaLibraryList', () => {
     expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Format' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: '# of Fields' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Lifecycle' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Used by # of Projects' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Updated on' })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Ownership' })).not.toBeInTheDocument();
@@ -77,6 +82,11 @@ describe('SchemaLibraryList', () => {
   it('renders contextual no-field summary in fields column', () => {
     renderList([makeItem({ fieldCount: 0, status: 'needs_review' })]);
     expect(screen.getByText('No fields yet')).toBeInTheDocument();
+  });
+
+  it('renders lifecycle summary in list rows', () => {
+    renderList([makeItem({ latestVersion: 2, draftRevision: 6, lifecycle: 'versioned' })]);
+    expect(screen.getByTestId('schema-list-lifecycle')).toHaveTextContent('v2 · Draft r6');
   });
 
   it('row click navigates to schema detail', async () => {

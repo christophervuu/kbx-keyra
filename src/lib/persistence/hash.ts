@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { MappingConfig } from './types.js';
 
 function sortObject(value: unknown): unknown {
@@ -20,6 +22,10 @@ function sortObject(value: unknown): unknown {
 
 function stableStringify(value: unknown): string {
   return JSON.stringify(sortObject(value));
+}
+
+export function computeStableJsonSha256(value: unknown): string {
+  return createHash('sha256').update(stableStringify(value)).digest('hex');
 }
 
 function toHex(bytes: Uint8Array): string {
@@ -45,6 +51,5 @@ export async function computeConfigHash(config: MappingConfig): Promise<string> 
     return digestToHex(digest);
   }
 
-  const { createHash } = await import('node:crypto');
-  return createHash('sha256').update(json).digest('hex');
+  return computeStableJsonSha256(config);
 }

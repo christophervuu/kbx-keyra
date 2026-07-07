@@ -30,6 +30,8 @@ export const TEST_TABLES = {
   mappings: `keyra-mappings-fs061-${SUFFIX}`,
   schemaMetadata: `keyra-schema-metadata-fs061-${SUFFIX}`,
   schemaNodes: `keyra-schema-nodes-fs061-${SUFFIX}`,
+  schemaDrafts: `keyra-schema-drafts-fs061-${SUFFIX}`,
+  schemaVersions: `keyra-schema-versions-fs061-${SUFFIX}`,
   mappingRevisions: `keyra-mapping-revisions-fs061-${SUFFIX}`,
   mappingVersions: `keyra-mapping-versions-fs061-${SUFFIX}`,
 } as const;
@@ -78,6 +80,8 @@ export function applyIntegrationEnvironment(): void {
   processRef.env.MAPPINGS_TABLE = TEST_TABLES.mappings;
   processRef.env.SCHEMA_METADATA_TABLE = TEST_TABLES.schemaMetadata;
   processRef.env.SCHEMA_NODES_TABLE = TEST_TABLES.schemaNodes;
+  processRef.env.SCHEMA_DRAFTS_TABLE = TEST_TABLES.schemaDrafts;
+  processRef.env.SCHEMA_VERSIONS_TABLE = TEST_TABLES.schemaVersions;
   processRef.env.MAPPING_REVISIONS_TABLE = TEST_TABLES.mappingRevisions;
   processRef.env.MAPPING_VERSIONS_TABLE = TEST_TABLES.mappingVersions;
   processRef.env.STORAGE_BUCKET = TEST_BUCKET;
@@ -195,6 +199,32 @@ export async function createTables(): Promise<void> {
   }));
 
   await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.schemaDrafts,
+    AttributeDefinitions: [
+      { AttributeName: 'schemaId', AttributeType: 'S' },
+      { AttributeName: 'revision', AttributeType: 'N' },
+    ],
+    KeySchema: [
+      { AttributeName: 'schemaId', KeyType: 'HASH' },
+      { AttributeName: 'revision', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.schemaVersions,
+    AttributeDefinitions: [
+      { AttributeName: 'schemaId', AttributeType: 'S' },
+      { AttributeName: 'version', AttributeType: 'N' },
+    ],
+    KeySchema: [
+      { AttributeName: 'schemaId', KeyType: 'HASH' },
+      { AttributeName: 'version', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await dynamo.send(new CreateTableCommand({
     TableName: TEST_TABLES.mappingRevisions,
     AttributeDefinitions: [
       { AttributeName: 'mappingId', AttributeType: 'S' },
@@ -224,6 +254,8 @@ export async function createTables(): Promise<void> {
   await waitForTableActive(TEST_TABLES.mappings);
   await waitForTableActive(TEST_TABLES.schemaMetadata);
   await waitForTableActive(TEST_TABLES.schemaNodes);
+  await waitForTableActive(TEST_TABLES.schemaDrafts);
+  await waitForTableActive(TEST_TABLES.schemaVersions);
   await waitForTableActive(TEST_TABLES.mappingRevisions);
   await waitForTableActive(TEST_TABLES.mappingVersions);
 }
@@ -233,6 +265,8 @@ export async function deleteTables(): Promise<void> {
   const orderedDeletion = [
     TEST_TABLES.mappingVersions,
     TEST_TABLES.mappingRevisions,
+    TEST_TABLES.schemaVersions,
+    TEST_TABLES.schemaDrafts,
     TEST_TABLES.schemaNodes,
     TEST_TABLES.schemaMetadata,
     TEST_TABLES.mappings,

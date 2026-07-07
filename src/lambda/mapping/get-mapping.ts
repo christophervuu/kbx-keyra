@@ -36,8 +36,22 @@ interface MappingConfig {
   readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
-  readonly sourceSchemaRef?: { readonly schemaId: string; readonly type: 'github' | 'local' | 'published'; readonly commitSha?: string };
-  readonly targetSchemaRef?: { readonly schemaId: string; readonly type: 'github' | 'local' | 'published'; readonly commitSha?: string };
+  readonly sourceSchemaRef?: {
+    readonly schemaId: string;
+    readonly type: 'github' | 'local' | 'published';
+    readonly commitSha?: string;
+    readonly schemaVersion?: number;
+    readonly schemaVersionId?: string;
+    readonly contentHash?: string;
+  };
+  readonly targetSchemaRef?: {
+    readonly schemaId: string;
+    readonly type: 'github' | 'local' | 'published';
+    readonly commitSha?: string;
+    readonly schemaVersion?: number;
+    readonly schemaVersionId?: string;
+    readonly contentHash?: string;
+  };
   readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly config: {
     readonly unmappedTargets?: 'omit' | 'null' | 'error';
@@ -53,6 +67,9 @@ type SchemaRef = NonNullable<MappingConfig['sourceSchemaRef']>;
 interface MappingEnrichmentSource {
   readonly alias: string;
   readonly schemaId?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
   readonly required?: boolean;
   readonly description?: string;
 }
@@ -107,11 +124,19 @@ function normalizeCanonicalEnrichmentSources(value: unknown): readonly MappingEn
 
     aliases.add(alias);
     const schemaId = typeof candidate.schemaId === 'string' ? candidate.schemaId.trim() : '';
+    const schemaVersion = typeof candidate.schemaVersion === 'number' && Number.isInteger(candidate.schemaVersion)
+      ? candidate.schemaVersion
+      : undefined;
+    const schemaVersionId = typeof candidate.schemaVersionId === 'string' ? candidate.schemaVersionId.trim() : '';
+    const contentHash = typeof candidate.contentHash === 'string' ? candidate.contentHash.trim() : '';
     const required = typeof candidate.required === 'boolean' ? candidate.required : true;
     const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
     normalized.push({
       alias,
       ...(schemaId ? { schemaId } : {}),
+      ...(schemaVersion ? { schemaVersion } : {}),
+      ...(schemaVersionId ? { schemaVersionId } : {}),
+      ...(contentHash ? { contentHash } : {}),
       required,
       ...(description ? { description } : {}),
     });

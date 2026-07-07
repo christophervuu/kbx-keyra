@@ -3,6 +3,7 @@ import {
   ERROR_CODES,
   S3ServiceError,
   errorResponse,
+  getObject,
   getItem,
   internalError,
   jsonResponse,
@@ -29,6 +30,7 @@ import {
   type SchemaSourceKind,
   type SchemaStatus,
 } from '../../lib/persistence/types.js';
+import { applySchemaPatches, SchemaPatchError, type SchemaPatchOperation } from '../../lib/schema/patch-engine.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
 type SchemaSyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
@@ -165,6 +167,71 @@ function contentKey(schemaId: string, format: SchemaFormat): string {
   return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
 }
 
+function normalizePatchOperations(value: unknown): SchemaPatchOperation[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized: SchemaPatchOperation[] = [];
+
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') {
+      return null;
+    }
+
+    const record = candidate as Record<string, unknown>;
+    if (record.op === 'set') {
+      if (typeof record.pointer !== 'string') {
+        return null;
+      }
+
+      normalized.push({
+        op: 'set',
+        pointer: record.pointer,
+        value: record.value,
+      });
+      continue;
+    }
+
+    if (record.op === 'remove') {
+      if (typeof record.pointer !== 'string') {
+        return null;
+      }
+
+      normalized.push({
+        op: 'remove',
+        pointer: record.pointer,
+      });
+      continue;
+    }
+
+    if (record.op === 'addField') {
+      if (
+        typeof record.parentPointer !== 'string'
+        || typeof record.fieldName !== 'string'
+        || !record.fieldSchema
+        || typeof record.fieldSchema !== 'object'
+        || Array.isArray(record.fieldSchema)
+      ) {
+        return null;
+      }
+
+      normalized.push({
+        op: 'addField',
+        parentPointer: record.parentPointer,
+        fieldName: record.fieldName,
+        fieldSchema: record.fieldSchema as Record<string, unknown>,
+        ...(typeof record.required === 'boolean' ? { required: record.required } : {}),
+      });
+      continue;
+    }
+
+    return null;
+  }
+
+  return normalized;
+}
+
 function isMetadataMutation(input: Record<string, unknown>): boolean {
   return (
     Object.prototype.hasOwnProperty.call(input, 'name')
@@ -226,6 +293,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 
   const input = body as Record<string, unknown>;
+  const requestedPatches = Object.prototype.hasOwnProperty.call(input, 'patches')
+    ? normalizePatchOperations(input.patches)
+    : null;
+
+  if (Object.prototype.hasOwnProperty.call(input, 'patches') && !requestedPatches) {
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid field: patches must be a valid schema patch operation array', 400, false);
+  }
 
   const requestedFormat = Object.prototype.hasOwnProperty.call(input, 'format')
     ? asSchemaFormat(input.format)
@@ -290,9 +364,54 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const effectiveFormat = requestedFormat ?? existing.format;
     const now = new Date().toISOString();
     const didUpdateContent = Object.prototype.hasOwnProperty.call(input, 'content');
+    const didPatchContent = Array.isArray(requestedPatches) && requestedPatches.length > 0;
 
-    if (didUpdateContent) {
-      const serialized = toContentString(input.content, effectiveFormat);
+    if (didPatchContent && didUpdateContent) {
+      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Provide either content or patches, not both', 400, false);
+    }
+
+    if (didPatchContent && effectiveFormat !== 'json-schema') {
+      return errorResponse(
+        ERROR_CODES.VALIDATION_ERROR,
+        'Patch operations are supported only for json-schema format',
+        400,
+        false,
+      );
+    }
+
+    if (didUpdateContent || didPatchContent) {
+      let serialized: string | null;
+
+      if (didPatchContent) {
+        try {
+          const currentRaw = await getObject({
+            Bucket: getContentBucketOrThrow(),
+            Key: contentKey(schemaId, effectiveFormat),
+          });
+          const parsedCurrent = JSON.parse(currentRaw) as Record<string, unknown>;
+          serialized = JSON.stringify(
+            applySchemaPatches({
+              content: parsedCurrent,
+              patches: requestedPatches,
+              changeSummary: typeof input.changeSummary === 'string' ? input.changeSummary : undefined,
+            }).content,
+          );
+        } catch (error) {
+          if (error instanceof SchemaPatchError) {
+            const code = ERROR_CODES.VALIDATION_ERROR;
+            return errorResponse(code, error.message, 400, false);
+          }
+
+          if (error instanceof SyntaxError) {
+            return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Existing schema content is not valid JSON', 400, false);
+          }
+
+          throw error;
+        }
+      } else {
+        serialized = toContentString(input.content, effectiveFormat);
+      }
+
       if (!serialized) {
         return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid field: content', 400, false);
       }
@@ -305,7 +424,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
     }
 
-    if (!didUpdateContent && !isMetadataMutation(input)) {
+    if (!didUpdateContent && !didPatchContent && !isMetadataMutation(input)) {
       return jsonResponse(200, normalizeSchemaRecordForResponse(existing));
     }
 
@@ -332,7 +451,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       inferred: existing.inferred,
     });
 
-    const nextSyncStatus: SchemaSyncStatus = didUpdateContent && normalizeSchemaSyncStatus(existing.syncStatus ?? 'sync-failed') === 'synced'
+    const nextSyncStatus: SchemaSyncStatus = (didUpdateContent || didPatchContent) && normalizeSchemaSyncStatus(existing.syncStatus ?? 'sync-failed') === 'synced'
       ? 'sync-failed'
       : normalizeSchemaSyncStatus(existing.syncStatus ?? 'sync-failed');
 

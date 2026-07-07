@@ -4,8 +4,10 @@ import { dynamoClient } from './clients.js';
 import { TABLE_NAMES } from './config.js';
 import type {
   CreateSchemaMetadataInput,
+  SchemaDraftItem,
   SchemaIngestStatus,
   SchemaMetadataItem,
+  SchemaVersionItem,
   SchemaReviewIssueCode,
   SchemaReviewIssueSummary,
   SchemaReviewState,
@@ -263,6 +265,24 @@ export async function remove(schemaId: string): Promise<void> {
       Key: {
         schemaId,
       },
+    }),
+  );
+}
+
+export async function initializeDraft(schemaId: string, draft: SchemaDraftItem): Promise<void> {
+  await dynamoClient.send(
+    new PutCommand({
+      TableName: TABLE_NAMES.schemaDrafts,
+      Item: draft,
+    }),
+  );
+}
+
+export async function createVersion(schemaId: string, version: SchemaVersionItem): Promise<void> {
+  await dynamoClient.send(
+    new PutCommand({
+      TableName: TABLE_NAMES.schemaVersions,
+      Item: version,
     }),
   );
 }

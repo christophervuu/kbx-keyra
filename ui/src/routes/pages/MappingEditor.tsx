@@ -18,6 +18,7 @@ import {
   ObjectSummaryPanel,
   RefreshConfirmBanner,
   ScalarFieldBuilder,
+  SchemaUpgradeStrip,
   SourceSchemaPanel,
   TargetWorklist,
   IssuesPanel,
@@ -70,6 +71,11 @@ import { useAdapter } from '@/lib/api';
 import { executeMapping } from '@/lib/engine';
 import { queryKeys, queryPolicies } from '@/lib/query';
 import type {
+  MappingSchemaUpgradeApplyInput,
+  MappingSchemaUpgradePreviewInput,
+  MappingSchemaUpgradePreviewResult,
+  MappingSchemaUpgradeRole,
+  MappingSchemaUpgradeImmutableRef,
   MappingRuleProjectValueTableRef,
   ValueMapMatchMode,
   MappingRuleValueTableRef,
@@ -85,6 +91,7 @@ import type {
   ValueTableStatus,
   OutputPathIndex,
   PreviewExecutionState,
+  SchemaVersionEntry,
 } from '@/lib/types/domain';
 import { PATHS } from '@/routes/paths';
 
@@ -561,6 +568,70 @@ interface SmartMethodSwitchPromptState {
   readonly targetPath: string;
   readonly actionId: string;
   readonly options?: Parameters<typeof applySmartActionToDraft>[2];
+}
+
+interface SchemaUpgradeTargetKeyParts {
+  readonly role: MappingSchemaUpgradeRole;
+  readonly alias?: string;
+}
+
+interface SchemaUpgradeUiState {
+  readonly status: 'idle' | 'loading' | 'preview-ready' | 'applying' | 'error';
+  readonly error?: string | null;
+  readonly preview?: MappingSchemaUpgradePreviewResult;
+  readonly acceptedSuggestionIds: ReadonlySet<string>;
+  readonly previewInvalidated?: boolean;
+  readonly previewInvalidationReason?: string | null;
+}
+
+interface MappingSchemaRefWarning {
+  readonly role: 'source' | 'target' | 'enrichment';
+  readonly schemaId: string;
+  readonly alias?: string;
+  readonly code?: string;
+  readonly statusCode?: number;
+  readonly message: string;
+}
+
+const EMPTY_ACCEPTED_SUGGESTIONS: ReadonlySet<string> = new Set<string>();
+
+function schemaUpgradeTargetKey(parts: SchemaUpgradeTargetKeyParts): string {
+  return parts.role === 'enrichment' ? `enrichment:${parts.alias ?? ''}` : parts.role;
+}
+
+function parseSchemaUpgradeTargetKey(targetKey: string): SchemaUpgradeTargetKeyParts | null {
+  if (targetKey === 'source' || targetKey === 'target') {
+    return { role: targetKey };
+  }
+  if (targetKey.startsWith('enrichment:')) {
+    const alias = targetKey.slice('enrichment:'.length);
+    if (alias.trim().length === 0) return null;
+    return { role: 'enrichment', alias };
+  }
+  return null;
+}
+
+function toImmutableRef(ref: {
+  readonly schemaId?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
+}): MappingSchemaUpgradeImmutableRef | null {
+  const schemaId = typeof ref.schemaId === 'string' ? ref.schemaId.trim() : '';
+  const schemaVersion = typeof ref.schemaVersion === 'number' ? ref.schemaVersion : NaN;
+  const schemaVersionId = typeof ref.schemaVersionId === 'string' ? ref.schemaVersionId.trim() : '';
+  const contentHash = typeof ref.contentHash === 'string' ? ref.contentHash.trim() : '';
+
+  if (!schemaId || !Number.isFinite(schemaVersion) || !schemaVersionId || !contentHash) {
+    return null;
+  }
+
+  return {
+    schemaId,
+    schemaVersion,
+    schemaVersionId,
+    contentHash,
+  };
 }
 
 function inferDirectionSupportFromRevision(revision: ProjectValueTableRevision): ValueTableDirectionSupport {
@@ -2790,7 +2861,6 @@ export default function MappingEditor() {
     if (editor.loadState === 'loaded' && editor.mappingName) {
       recordActivity({ type: 'mapping', id: mappingId, projectId, name: editor.mappingName });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on successful load
   }, [editor.loadState]);
 
   // ---------------------------------------------------------------------------
@@ -2981,7 +3051,313 @@ export default function MappingEditor() {
   const [valueMapConversionPrompt, setValueMapConversionPrompt] = useState<ValueMapConversionPromptState | null>(null);
   const [valueMapAdoptionPrompt, setValueMapAdoptionPrompt] = useState<ValueMapAdoptionPromptState | null>(null);
   const [smartMethodSwitchPrompt, setSmartMethodSwitchPrompt] = useState<SmartMethodSwitchPromptState | null>(null);
-  const [isLatestSavedNoticeDismissed, setIsLatestSavedNoticeDismissed] = useState(false);
+  const [schemaUpgradeStateByKey, setSchemaUpgradeStateByKey] = useState<Record<string, SchemaUpgradeUiState>>({});
+  const [schemaUpgradeApplyConfirmTargetKey, setSchemaUpgradeApplyConfirmTargetKey] = useState<string | null>(null);
+  const [dismissedLatestSavedRevision, setDismissedLatestSavedRevision] = useState<number | null>(null);
+
+  const schemaUpgradeRefTargets = useMemo(() => {
+    const targets: Array<{
+      key: string;
+      role: MappingSchemaUpgradeRole;
+      label: string;
+      alias?: string;
+      currentPin: MappingSchemaUpgradeImmutableRef;
+    }> = [];
+
+    const sourcePin = toImmutableRef(editor.config?.sourceSchemaRef ?? {});
+    if (sourcePin) {
+      targets.push({
+        key: schemaUpgradeTargetKey({ role: 'source' }),
+        role: 'source',
+        label: 'Source schema',
+        currentPin: sourcePin,
+      });
+    }
+
+    const targetPin = toImmutableRef(editor.config?.targetSchemaRef ?? {});
+    if (targetPin) {
+      targets.push({
+        key: schemaUpgradeTargetKey({ role: 'target' }),
+        role: 'target',
+        label: 'Target schema',
+        currentPin: targetPin,
+      });
+    }
+
+    for (const enrichment of editor.config?.enrichmentSources ?? []) {
+      const pin = toImmutableRef(enrichment);
+      if (!pin) continue;
+      targets.push({
+        key: schemaUpgradeTargetKey({ role: 'enrichment', alias: enrichment.alias }),
+        role: 'enrichment',
+        label: `Enrichment (${enrichment.alias})`,
+        alias: enrichment.alias,
+        currentPin: pin,
+      });
+    }
+
+    return targets;
+  }, [editor.config]);
+
+  const schemaUpgradeSchemaIds = useMemo(
+    () => [...new Set(schemaUpgradeRefTargets.map((entry) => entry.currentPin.schemaId))],
+    [schemaUpgradeRefTargets],
+  );
+
+  const schemaUpgradeVersionsQuery = useQuery({
+    queryKey: ['mapping-editor', mappingId, 'schema-upgrade-versions', ...schemaUpgradeSchemaIds],
+    enabled:
+      schemaUpgradeSchemaIds.length > 0
+      && typeof adapter.listSchemaVersions === 'function',
+    staleTime: queryPolicies.schemaDetail.staleTime,
+    gcTime: queryPolicies.schemaDetail.gcTime,
+    retry: false,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        schemaUpgradeSchemaIds.map(async (schemaId) => {
+          const versions = await adapter.listSchemaVersions!(schemaId);
+          return [schemaId, versions] as const;
+        }),
+      );
+      return Object.fromEntries(entries) as Record<string, readonly SchemaVersionEntry[]>;
+    },
+  });
+
+  const latestVersionBySchemaId = useMemo(() => {
+    const next: Record<string, MappingSchemaUpgradeImmutableRef | undefined> = {};
+    const versionMap = schemaUpgradeVersionsQuery.data ?? {};
+    for (const schemaId of schemaUpgradeSchemaIds) {
+      const versions = versionMap[schemaId] ?? [];
+      const latestReady = versions
+        .filter((entry) => entry.versionStatus === 'ready' || entry.versionStatus === 'deprecated')
+        .sort((a, b) => b.version - a.version)[0];
+      if (latestReady) {
+        next[schemaId] = {
+          schemaId: latestReady.schemaId,
+          schemaVersion: latestReady.version,
+          schemaVersionId: latestReady.schemaVersionId,
+          contentHash: latestReady.contentHash,
+        };
+      }
+    }
+    return next;
+  }, [schemaUpgradeSchemaIds, schemaUpgradeVersionsQuery.data]);
+
+  const schemaRefWarnings = editor.schemaLoadWarnings as readonly MappingSchemaRefWarning[];
+
+  const schemaUpgradeTargets = useMemo(() => {
+    return schemaUpgradeRefTargets.map((target) => {
+      const destination = latestVersionBySchemaId[target.currentPin.schemaId] ?? target.currentPin;
+      const state = schemaUpgradeStateByKey[target.key];
+      const preview = state?.preview;
+
+      const derivedInvalidation = (() => {
+        if (!preview) {
+          return {
+            invalidated: state?.previewInvalidated === true,
+            reason: state?.previewInvalidationReason ?? null,
+          };
+        }
+        if (preview.baseMappingRevision !== editor.currentRevision) {
+          return {
+            invalidated: true,
+            reason: `Preview invalidated: mapping revision changed from ${preview.baseMappingRevision} to ${editor.currentRevision}.`,
+          };
+        }
+        if (preview.to.schemaVersionId !== destination.schemaVersionId) {
+          return {
+            invalidated: true,
+            reason: 'Preview invalidated: destination schema version changed. Refresh preview.',
+          };
+        }
+        return {
+          invalidated: false,
+          reason: null,
+        };
+      })();
+
+      const warning = schemaRefWarnings.find((entry) => (
+        entry.role === target.role
+        && entry.schemaId === target.currentPin.schemaId
+        && (target.role !== 'enrichment' || entry.alias === target.alias)
+      ));
+
+      const blockReason = warning?.message && /archiv/i.test(warning.message)
+        ? warning.message
+        : undefined;
+
+      const status: 'Current' | 'Update available' | 'Review required' | 'Upgrade blocked' = blockReason
+        ? 'Upgrade blocked'
+        : state?.preview && !derivedInvalidation.invalidated
+          ? 'Review required'
+          : destination.schemaVersion > target.currentPin.schemaVersion
+            ? 'Update available'
+            : 'Current';
+
+      return {
+        key: target.key,
+        role: target.role,
+        label: target.label,
+        currentPin: target.currentPin,
+        destinationPin: destination,
+        status,
+        isArchivedFamily: blockReason !== undefined,
+        warningMessage: warning?.message,
+        blockReason,
+        upgradeState: state
+          ? {
+            ...state,
+            previewInvalidated: derivedInvalidation.invalidated,
+            previewInvalidationReason: derivedInvalidation.reason,
+          }
+          : undefined,
+      };
+    });
+  }, [editor.currentRevision, latestVersionBySchemaId, schemaRefWarnings, schemaUpgradeRefTargets, schemaUpgradeStateByKey]);
+
+  const handleReviewSchemaUpdate = useCallback(async (targetKey: string) => {
+    if (typeof adapter.previewSchemaUpgrade !== 'function') {
+      setSchemaUpgradeStateByKey((prev) => ({
+        ...prev,
+        [targetKey]: {
+          status: 'error',
+          error: 'Schema upgrade preview is not available in this backend mode.',
+          acceptedSuggestionIds: EMPTY_ACCEPTED_SUGGESTIONS,
+        },
+      }));
+      return;
+    }
+
+    const target = schemaUpgradeTargets.find((entry) => entry.key === targetKey);
+    if (!target || target.status === 'Upgrade blocked') return;
+
+    const request: MappingSchemaUpgradePreviewInput = {
+      expectedMappingRevision: editor.currentRevision,
+      role: target.role,
+      ...(target.role === 'enrichment' ? { enrichmentAlias: parseSchemaUpgradeTargetKey(targetKey)?.alias } : {}),
+      destination: target.destinationPin,
+    };
+
+    setSchemaUpgradeStateByKey((prev) => ({
+      ...prev,
+      [targetKey]: {
+        status: 'loading',
+        acceptedSuggestionIds: EMPTY_ACCEPTED_SUGGESTIONS,
+      },
+    }));
+
+    try {
+      const preview = await adapter.previewSchemaUpgrade(mappingId, request);
+      setSchemaUpgradeStateByKey((prev) => ({
+        ...prev,
+        [targetKey]: {
+          status: 'preview-ready',
+          preview,
+          acceptedSuggestionIds: EMPTY_ACCEPTED_SUGGESTIONS,
+          previewInvalidated: false,
+          previewInvalidationReason: null,
+        },
+      }));
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Failed to review schema update';
+      setSchemaUpgradeStateByKey((prev) => ({
+        ...prev,
+        [targetKey]: {
+          status: 'error',
+          error: message,
+          acceptedSuggestionIds: prev[targetKey]?.acceptedSuggestionIds ?? EMPTY_ACCEPTED_SUGGESTIONS,
+        },
+      }));
+    }
+  }, [adapter, editor.currentRevision, mappingId, schemaUpgradeTargets]);
+
+  const handleToggleSchemaUpgradeSuggestion = useCallback((targetKey: string, suggestionId: string) => {
+    setSchemaUpgradeStateByKey((prev) => {
+      const existing = prev[targetKey];
+      if (!existing) return prev;
+      const next = new Set(existing.acceptedSuggestionIds);
+      if (next.has(suggestionId)) {
+        next.delete(suggestionId);
+      } else {
+        next.add(suggestionId);
+      }
+      return {
+        ...prev,
+        [targetKey]: {
+          ...existing,
+          acceptedSuggestionIds: next,
+        },
+      };
+    });
+  }, []);
+
+  const handleRequestApplySchemaUpgrade = useCallback((targetKey: string) => {
+    setSchemaUpgradeApplyConfirmTargetKey(targetKey);
+  }, []);
+
+  const handleConfirmApplySchemaUpgrade = useCallback(async () => {
+    const targetKey = schemaUpgradeApplyConfirmTargetKey;
+    if (!targetKey || typeof adapter.applySchemaUpgrade !== 'function') {
+      setSchemaUpgradeApplyConfirmTargetKey(null);
+      return;
+    }
+
+    const targetState = schemaUpgradeStateByKey[targetKey];
+    if (!targetState?.preview) {
+      setSchemaUpgradeApplyConfirmTargetKey(null);
+      return;
+    }
+
+    const payload: MappingSchemaUpgradeApplyInput = {
+      expectedMappingRevision: editor.currentRevision,
+      previewId: targetState.preview.previewId,
+      acceptedSuggestions: [...targetState.acceptedSuggestionIds],
+      confirm: true,
+    };
+
+    setSchemaUpgradeStateByKey((prev) => {
+      const existing = prev[targetKey];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [targetKey]: {
+          ...existing,
+          status: 'applying',
+          error: null,
+        },
+      };
+    });
+
+    try {
+      await adapter.applySchemaUpgrade(mappingId, payload);
+      await editor.actions.refreshToLatestSaved();
+      setSchemaUpgradeStateByKey((prev) => ({
+        ...prev,
+        [targetKey]: {
+          status: 'idle',
+          acceptedSuggestionIds: EMPTY_ACCEPTED_SUGGESTIONS,
+        },
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to apply schema upgrade';
+      setSchemaUpgradeStateByKey((prev) => {
+        const existing = prev[targetKey];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [targetKey]: {
+            ...existing,
+            status: 'error',
+            error: message,
+          },
+        };
+      });
+    } finally {
+      setSchemaUpgradeApplyConfirmTargetKey(null);
+    }
+  }, [adapter, editor.actions, editor.currentRevision, mappingId, schemaUpgradeApplyConfirmTargetKey, schemaUpgradeStateByKey]);
 
   const sourceValueTypeByPath = useMemo<Readonly<Record<string, SmartBuilderDraft['targetType']>>>(() => {
     return Object.fromEntries(
@@ -3242,13 +3618,8 @@ export default function MappingEditor() {
 
   const showLatestSavedRevisionNotice =
     editor.hasNewerSavedRevision
-    && !isLatestSavedNoticeDismissed;
-
-  useEffect(() => {
-    if (!editor.hasNewerSavedRevision) {
-      setIsLatestSavedNoticeDismissed(false);
-    }
-  }, [editor.hasNewerSavedRevision]);
+    && editor.latestSavedRevision !== null
+    && editor.latestSavedRevision !== dismissedLatestSavedRevision;
 
   useEffect(() => {
     debugRuleTypeLog('selected target snapshot', {
@@ -4844,6 +5215,16 @@ export default function MappingEditor() {
     )
     : null;
 
+  const schemaUpgradeContent = schemaUpgradeTargets.length > 0 ? (
+    <SchemaUpgradeStrip
+      targets={schemaUpgradeTargets}
+      onReviewUpdate={(targetKey) => { void handleReviewSchemaUpdate(targetKey); }}
+      onToggleSuggestion={handleToggleSchemaUpgradeSuggestion}
+      onApplyUpgrade={handleRequestApplySchemaUpgrade}
+      onRefreshPreview={(targetKey) => { void handleReviewSchemaUpdate(targetKey); }}
+    />
+  ) : null;
+
   return (
     <>
       <MappingEditorPage
@@ -4906,6 +5287,7 @@ export default function MappingEditor() {
         onResetEditorPanelLayout={resetEditorPanelLayout}
         showEditorLayoutAnnouncement={showEditorLayoutAnnouncement}
         onDismissEditorLayoutAnnouncement={handleDismissEditorLayoutAnnouncement}
+        schemaUpgradeContent={schemaUpgradeContent}
         onHideSourcePanel={panelMode === 'overview' ? undefined : handleHideSourcePanel}
         onHideBuilderPanel={panelMode !== 'row-editing' ? undefined : handleHideBuilderPanel}
       />
@@ -4931,7 +5313,7 @@ export default function MappingEditor() {
               </button>
               <button
                 type="button"
-                onClick={() => setIsLatestSavedNoticeDismissed(true)}
+                onClick={() => setDismissedLatestSavedRevision(editor.latestSavedRevision)}
                 className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800"
                 data-testid="mapping-newer-saved-dismiss"
               >
@@ -4963,13 +5345,13 @@ export default function MappingEditor() {
         isEmpty={history.isEmpty}
         selectedVersion={history.selectedVersion}
         onSelectVersion={history.selectVersion}
-        currentVersion={editor.version}
+        currentVersion={editor.currentVersion ?? editor.version}
       >
         {history.selectedDiff && history.selectedVersion !== null && (
           <VersionDiffView
             diff={history.selectedDiff}
             selectedVersion={history.selectedVersion}
-            currentVersion={editor.version}
+            currentVersion={editor.currentVersion ?? editor.version}
             hasUnsavedChanges={editor.hasUnsavedChanges}
             onRestore={handleRestore}
             onBack={() => history.selectVersion(null)}
@@ -5016,6 +5398,16 @@ export default function MappingEditor() {
         cancelLabel="Cancel"
         onConfirm={handleBlockerDiscard}
         onCancel={handleBlockerCancel}
+      />
+
+      <ConfirmDialog
+        open={schemaUpgradeApplyConfirmTargetKey !== null}
+        title="Apply schema update?"
+        message="This applies the reviewed schema upgrade pin to your draft mapping. No deploy action is triggered; save remains explicit."
+        confirmLabel="Apply upgrade"
+        cancelLabel="Cancel"
+        onConfirm={() => { void handleConfirmApplySchemaUpgrade(); }}
+        onCancel={() => setSchemaUpgradeApplyConfirmTargetKey(null)}
       />
 
       <ConfirmDialog

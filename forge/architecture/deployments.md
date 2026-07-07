@@ -551,3 +551,41 @@ UI/bootstrap implications:
 
 - Deployment UI bootstrap contract is aggregate `GET /mappings/:mappingId/deploy-context`.
 - Deployment history/current endpoints remain separate runtime/read models; deploy-context is authoritative page bootstrap surface for the canonical four-stage pipeline UX.
+
+---
+
+## 23) FS-105 immutable schema-version deployment contract addendum
+
+FS-105 strengthens deployment reproducibility requirements for schema dependencies.
+
+### 23.1 Snapshot schema reference bundle
+
+Deployment snapshots must embed immutable schema reference bundles for all mapping schema roles (source/target/enrichment):
+
+- `schemaId`
+- `schemaVersion`
+- `schemaVersionId`
+- `contentHash`
+- immutable artifact key(s) for schema content/parsed payload as applicable
+
+### 23.2 Runtime resolution boundary
+
+Runtime execution must resolve schema payloads only from snapshot/artifact references captured at deploy/promote time.
+
+Runtime must not:
+
+- resolve mutable latest schema metadata,
+- depend on schema-family draft state,
+- require user-schema GitHub sync state.
+
+### 23.3 Promote/rollback invariants
+
+Promote and rollback continue to operate on exact artifact identity:
+
+- promote reuses the same immutable schema artifact identity already captured in snapshot metadata,
+- rollback restores prior snapshot schema artifact identity without reinterpretation.
+
+### 23.4 Compatibility and migration
+
+Historical deployment artifacts must be backfilled/migrated to immutable schema-version reference bundles with parity guarantees so pre-existing deployments remain behaviorally unchanged.
+

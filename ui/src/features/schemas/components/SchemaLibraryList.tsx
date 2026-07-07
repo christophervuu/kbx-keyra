@@ -21,6 +21,18 @@ function formatFieldCount(item: SchemaLibraryItem): string {
   return 'No fields';
 }
 
+function formatLifecycleSummary(item: SchemaLibraryItem): string {
+  if (item.archived) return 'Archived';
+  if (item.latestVersion <= 0) {
+    return item.draftRevision != null && item.draftRevision > 0
+      ? `Draft r${item.draftRevision}`
+      : 'Draft only';
+  }
+  return item.draftRevision != null && item.draftRevision > 0
+    ? `v${item.latestVersion} · Draft r${item.draftRevision}`
+    : `v${item.latestVersion}`;
+}
+
 export function SchemaLibraryList({ items }: SchemaLibraryListProps) {
   const navigate = useNavigate();
 
@@ -33,6 +45,7 @@ export function SchemaLibraryList({ items }: SchemaLibraryListProps) {
             <th className="px-4 py-3">Status</th>
             <th className="px-4 py-3">Format</th>
             <th className="px-4 py-3"># of Fields</th>
+            <th className="px-4 py-3">Lifecycle</th>
             <th className="px-4 py-3">Used by # of Projects</th>
             <th className="px-4 py-3">Updated on</th>
           </tr>
@@ -76,6 +89,7 @@ export function SchemaLibraryList({ items }: SchemaLibraryListProps) {
               </td>
               <td className="px-4 py-3">{item.dataFormat}</td>
               <td className="px-4 py-3">{formatFieldCount(item)}</td>
+              <td className="px-4 py-3" data-testid="schema-list-lifecycle">{formatLifecycleSummary(item)}</td>
               <td className="px-4 py-3">{item.projectCount}</td>
               <td className="px-4 py-3">{new Date(item.updatedAt).toLocaleDateString()}</td>
             </tr>

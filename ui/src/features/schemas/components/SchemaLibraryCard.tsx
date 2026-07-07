@@ -21,6 +21,26 @@ interface OriginBadgeProps {
   ownership: SchemaLibraryItem['ownership'];
 }
 
+function formatLifecycleSummary(item: SchemaLibraryItem): string {
+  if (item.archived) {
+    return 'Archived';
+  }
+
+  if (item.latestVersion <= 0) {
+    if (item.draftRevision != null && item.draftRevision > 0) {
+      return `Draft r${item.draftRevision}`;
+    }
+
+    return 'Draft only';
+  }
+
+  if (item.draftRevision != null && item.draftRevision > 0) {
+    return `v${item.latestVersion} · Draft r${item.draftRevision}`;
+  }
+
+  return `v${item.latestVersion}`;
+}
+
 const ORIGIN_CONFIG: Record<
   SchemaLibraryItem['origin'],
   { emoji: string; label: string; className: string }
@@ -152,6 +172,8 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
         <span data-testid="data-format">{item.dataFormat}</span>
         <span aria-hidden="true">·</span>
         <span data-testid="field-count">{getFieldSummary()}</span>
+        <span aria-hidden="true">·</span>
+        <span data-testid="schema-lifecycle-summary">{formatLifecycleSummary(item)}</span>
         {SYNC_STATUS_CONFIG[item.syncStatus] !== null && (
           <>
             <span aria-hidden="true">·</span>

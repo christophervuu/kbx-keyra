@@ -7,6 +7,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { loadSchemaLibraryData } from './schema-query-data';
 import { filterSchemas, sortSchemas } from '../lib/schema-filters';
 import type {
+  FilterLifecycle,
   FilterDataFormat,
   FilterOwnership,
   FilterStatus,
@@ -41,6 +42,7 @@ const DEFAULT_FILTERS: SchemaLibraryFilters = {
   ownerships: [],
   dataFormats: [],
   statuses: [],
+  lifecycles: [],
 };
 
 const DEFAULT_SORT: SchemaLibrarySort = {
@@ -62,6 +64,7 @@ export interface UseSchemaLibraryResult {
   toggleOwnershipFilter: (ownership: FilterOwnership) => void;
   toggleDataFormatFilter: (format: FilterDataFormat) => void;
   toggleStatusFilter: (status: FilterStatus) => void;
+  toggleLifecycleFilter: (lifecycle: FilterLifecycle) => void;
   setSort: (field: SortField, direction?: SortDirection) => void;
   viewMode: SchemaLibraryViewMode;
   setViewMode: (mode: SchemaLibraryViewMode) => void;
@@ -128,6 +131,15 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     }));
   }, []);
 
+  const toggleLifecycleFilter = useCallback((lifecycle: FilterLifecycle) => {
+    setFilters((f) => ({
+      ...f,
+      lifecycles: f.lifecycles.includes(lifecycle)
+        ? f.lifecycles.filter((value) => value !== lifecycle)
+        : [...f.lifecycles, lifecycle],
+    }));
+  }, []);
+
   const setSort = useCallback((field: SortField, direction?: SortDirection) => {
     setSort_((current) => {
       if (direction != null) {
@@ -172,6 +184,7 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     toggleOwnershipFilter,
     toggleDataFormatFilter,
     toggleStatusFilter,
+    toggleLifecycleFilter,
     setSort,
     viewMode,
     setViewMode,

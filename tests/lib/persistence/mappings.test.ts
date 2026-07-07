@@ -348,4 +348,43 @@ describe('persistence mappings', () => {
     const writtenConfig = JSON.parse(s3Command.input.Body) as MappingConfig;
     expect(writtenConfig.config.externalSources).toEqual(['customerProfile', 'legacyAlias']);
   });
+
+  it('create preserves immutable enrichment schema pins (schemaVersion/schemaVersionId/contentHash)', async () => {
+    randomUuidMock.mockReturnValue('mapping-created-pinned-enrichment');
+    s3SendMock.mockResolvedValue({});
+    dynamoSendMock.mockResolvedValue({});
+    const mappings = await importMappingsModule();
+
+    await mappings.create({
+      projectId: 'project-1',
+      name: 'Mapping Pinned Enrichment',
+      config: makeConfig({
+        enrichmentSources: [
+          {
+            alias: 'customerProfile',
+            schemaId: 'schema-customer',
+            schemaVersion: 7,
+            schemaVersionId: 'sv-customer-7',
+            contentHash: 'hash-customer-7',
+            required: true,
+          },
+        ],
+      }),
+    });
+
+    const s3Command = s3SendMock.mock.calls[0]?.[0] as {
+      input: { Body: string };
+    };
+    const writtenConfig = JSON.parse(s3Command.input.Body) as MappingConfig;
+    expect(writtenConfig.enrichmentSources).toEqual([
+      {
+        alias: 'customerProfile',
+        schemaId: 'schema-customer',
+        schemaVersion: 7,
+        schemaVersionId: 'sv-customer-7',
+        contentHash: 'hash-customer-7',
+        required: true,
+      },
+    ]);
+  });
 });

@@ -23,6 +23,27 @@ export {
   resolveDependencies,
 } from './cdm/index.js';
 export { computeSchemaDiff } from './diff/index.js';
+export { computeSchemaIdentityDiff, type SchemaIdentityDiffSummary } from './diff/index.js';
+export {
+  computeRoleImpactSummary,
+  extractRuleUsageFromExpression,
+  impactedPointerToDotPath,
+  type MappingImpactRole,
+  type RoleImpactSummary,
+  type RuleImpact,
+} from './mapping-impact.js';
+export {
+  assignInitialSchemaNodeIdentities,
+  deriveSchemaNodeIdentitiesForVersion,
+  extractSchemaIdentityPointersFromJsonSchema,
+  deleteAndReaddWithNewIdentity,
+  duplicateSubtreeWithNewIdentities,
+  loadSchemaNodeIdentitiesForVersion,
+  preserveIdentityForMove,
+  preserveIdentityForRename,
+  restoreIdentitiesFromVersion,
+  saveSchemaNodeIdentitiesForVersion,
+} from './identity.js';
 export {
   MetadataWriterError,
   NodeReaderError,
@@ -37,6 +58,13 @@ export {
   updateSyncMetadata,
   type SyncOutcomeMetadata,
 } from './dynamo/index.js';
+export {
+  computeCanonicalSchemaContentHash,
+  createImmutableSchemaVersion,
+  getActiveSchemaDraft,
+  getLatestImmutableSchemaVersion,
+  saveSchemaDraftRevision,
+} from './lifecycle.js';
 export {
   getSchemaRetriever,
   getSchemaRetrieverMode,

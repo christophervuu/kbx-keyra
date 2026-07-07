@@ -3473,3 +3473,59 @@ Collapsible panel rendered below `BuilderFeedbackArea` in `ScalarFieldBuilder`. 
 - Extend engine hooks beyond validation (for example `useEngineExecution()`) using the same debounce + typed-result pattern
 - Re-evaluate state/data libraries after FS-010 through FS-012 if complexity justifies adoption
 - Expand primitives toward a fuller internal design system only when feature pressure warrants it
+
+---
+
+## FS-105 Schema Lifecycle + Mapping Upgrade Architecture Addendum
+
+FS-105 defines the canonical UI architecture contracts for schema lifecycle, mapping schema pinning, and upgrade behavior.
+
+### Schema lifecycle model (UI contract)
+
+- User-owned schemas are managed in KeyRa as schema families with:
+  - one active mutable draft,
+  - draft revisions,
+  - immutable versions.
+- Immutable versions are selectable for mapping usage; mutable drafts are never mapping-selectable.
+- Version creation is explicit user action (`Create version`) and is not implied by draft save.
+- User-schema Git publish/sync UI behavior is retired from canonical user-owned schema flows.
+- CDM remains read-only and continues to expose explicit re-sync behavior that creates immutable versions rather than mutable edits.
+
+### Safe editing and representation boundaries
+
+- Guided schema editing is patch-oriented against canonical JSON Pointer targets on a lossless document model.
+- Unsupported constructs may be visible but are only editable where safety is defined; otherwise explicit unsupported-operation behavior is surfaced.
+- Untouched unsupported content must remain semantically equivalent after unrelated edits.
+
+### Version/readiness and status separation
+
+Schema detail and selector surfaces must model readiness as separate dimensions:
+
+- `versionStatus` (immutable version lifecycle state)
+- `indexStatus`
+- `impactStatus`
+- `sampleValidationStatus`
+
+UI status rendering must not collapse these into one aggregate status that hides downstream degradation.
+
+### Mapping editor schema pin + upgrade behavior
+
+- Mapping schema refs are explicit immutable pins (`schemaId`, `schemaVersion`, `schemaVersionId`, `contentHash`) for source/target/enrichment roles.
+- New schema versions do not auto-mutate existing mappings.
+- Upgrade behavior is explicit review/apply flow with role-aware impact summaries; no auto-apply, no automatic DSL rewrite.
+- Upgrade apply produces unsaved mapping changes until user explicitly saves a new revision.
+
+### Sample lifecycle behavior
+
+- Sample CRUD/default changes are schema-family metadata operations and do not create schema versions.
+- UI fallback behavior follows canonical precedence:
+  1. mapping-selected sample (if compatible),
+  2. schema-family default sample,
+  3. first compatible sample,
+  4. none.
+
+### Archive/deprecate behavior
+
+- Deprecated versions remain resolvable for existing mappings and are hidden-by-default for new selection with explicit reveal + warning.
+- Archived families are hidden from default new selection while existing pinned mappings remain editable/deployable with warning semantics.
+

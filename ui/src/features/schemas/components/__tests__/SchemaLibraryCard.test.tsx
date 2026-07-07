@@ -36,6 +36,10 @@ function makeItem(overrides: Partial<SchemaLibraryItem> = {}): SchemaLibraryItem
     syncStatus: 'local',
     projectCount: 2,
     projectNames: ['Project A', 'Project B'],
+    lifecycle: 'draft',
+    latestVersion: 0,
+    draftRevision: null,
+    archived: false,
     updatedAt: '2026-01-01T00:00:00Z',
     createdAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -223,6 +227,21 @@ describe('SchemaLibraryCard', () => {
   it('renders contextual zero-field copy for error status', () => {
     renderCard(makeItem({ fieldCount: 0, status: 'error' }));
     expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected (error)');
+  });
+
+  it('renders lifecycle summary as draft-only when no versions exist', () => {
+    renderCard(makeItem({ latestVersion: 0, draftRevision: null, lifecycle: 'draft' }));
+    expect(screen.getByTestId('schema-lifecycle-summary')).toHaveTextContent('Draft only');
+  });
+
+  it('renders lifecycle summary with latest version and draft revision', () => {
+    renderCard(makeItem({ latestVersion: 3, draftRevision: 8, lifecycle: 'versioned' }));
+    expect(screen.getByTestId('schema-lifecycle-summary')).toHaveTextContent('v3 · Draft r8');
+  });
+
+  it('renders archived lifecycle summary', () => {
+    renderCard(makeItem({ lifecycle: 'archived', archived: true, latestVersion: 4 }));
+    expect(screen.getByTestId('schema-lifecycle-summary')).toHaveTextContent('Archived');
   });
 
   it('renders updated date row', () => {

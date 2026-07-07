@@ -141,7 +141,13 @@ describe('persistence deployments', () => {
     expect(result.environmentDeployedAt.startsWith('DEV#')).toBe(true);
     expect(result.cdmSchemaTraceability).toBeUndefined();
 
-    expect(putSnapshotMock).toHaveBeenCalledWith('mapping-1', 'DEV', expect.any(String), expect.any(Object), {});
+    expect(putSnapshotMock).toHaveBeenCalledWith(
+      'mapping-1',
+      'DEV',
+      expect.any(String),
+      expect.any(Object),
+      { schemaRefs: [] },
+    );
 
     const deploymentPut = dynamoSendMock.mock.calls[0]?.[0] as {
       input: { TableName: string; Item: DeploymentItem };
@@ -230,7 +236,7 @@ describe('persistence deployments', () => {
           }),
         ],
       }),
-      {},
+      { schemaRefs: [] },
     );
   });
 
@@ -306,7 +312,7 @@ describe('persistence deployments', () => {
       'DEV',
       expect.any(String),
       expect.any(Object),
-      { cdmSchemaTraceability: traceability },
+      { schemaRefs: [], cdmSchemaTraceability: traceability },
     );
 
     const deploymentPut = dynamoSendMock.mock.calls[0]?.[0] as {
@@ -314,6 +320,79 @@ describe('persistence deployments', () => {
     };
     expect(deploymentPut.input.Item.cdmSchemaTraceability).toEqual(traceability);
     expect(result.cdmSchemaTraceability).toEqual(traceability);
+  });
+
+  it('create writes immutable schema reference bundle into deployment snapshot metadata', async () => {
+    putSnapshotMock.mockResolvedValue('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
+    dynamoSendMock.mockResolvedValue({});
+
+    const mod = await importModule();
+    await mod.create(
+      makeCreateInput({
+        config: makeConfig({
+          sourceSchemaRef: {
+            schemaId: 'source-1',
+            type: 'local',
+            schemaVersion: 3,
+            schemaVersionId: 'sv-source-3',
+            contentHash: 'hash-source-3',
+          },
+          targetSchemaRef: {
+            schemaId: 'target-1',
+            type: 'local',
+            schemaVersion: 5,
+            schemaVersionId: 'sv-target-5',
+            contentHash: 'hash-target-5',
+          },
+          enrichmentSources: [
+            {
+              alias: 'customerProfile',
+              schemaId: 'enrich-1',
+              schemaVersion: 2,
+              schemaVersionId: 'sv-enrich-2',
+              contentHash: 'hash-enrich-2',
+              required: true,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(putSnapshotMock).toHaveBeenCalledWith(
+      'mapping-1',
+      'DEV',
+      expect.any(String),
+      expect.any(Object),
+      {
+        schemaRefs: [
+          {
+            role: 'source',
+            schemaId: 'source-1',
+            schemaVersion: 3,
+            schemaVersionId: 'sv-source-3',
+            contentHash: 'hash-source-3',
+            contentS3Key: 'schemas/source-1/versions/v3.json',
+          },
+          {
+            role: 'target',
+            schemaId: 'target-1',
+            schemaVersion: 5,
+            schemaVersionId: 'sv-target-5',
+            contentHash: 'hash-target-5',
+            contentS3Key: 'schemas/target-1/versions/v5.json',
+          },
+          {
+            role: 'enrichment',
+            alias: 'customerProfile',
+            schemaId: 'enrich-1',
+            schemaVersion: 2,
+            schemaVersionId: 'sv-enrich-2',
+            contentHash: 'hash-enrich-2',
+            contentS3Key: 'schemas/enrich-1/versions/v2.json',
+          },
+        ],
+      },
+    );
   });
 
   it('getCurrent returns current item or null', async () => {

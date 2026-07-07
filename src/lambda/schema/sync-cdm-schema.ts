@@ -23,10 +23,12 @@ import type { SchemaSyncResult } from '../../lib/persistence/types.js';
 import { logSyncActivity } from '../../lib/persistence/index.js';
 import {
   batchWriteSchemaNodes,
+  createImmutableSchemaVersion,
   computeSchemaDiff,
   getAllSchemaNodes,
   getInlineFieldThreshold,
   parseJsonSchema,
+  saveSchemaDraftRevision,
   storeOriginalSchema,
   storeProcessedContent,
   updateSchemaStatus,
@@ -226,6 +228,40 @@ function isReadOnlyStatusMode(event: APIGatewayProxyEvent): boolean {
   return event.httpMethod?.toUpperCase() === 'GET';
 }
 
+async function materializeImmutableVersionFromSync(input: {
+  readonly schemaId: string;
+  readonly normalizedContent: string;
+  readonly upstreamCommitSha: string;
+  readonly actor: string;
+}): Promise<{
+  readonly draftRevision: number;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly replayed?: boolean;
+  readonly noChange?: boolean;
+}> {
+  const parsed = JSON.parse(input.normalizedContent) as Record<string, unknown>;
+  const draft = await saveSchemaDraftRevision(input.schemaId, {
+    content: parsed,
+    updatedBy: input.actor,
+  });
+
+  const version = await createImmutableSchemaVersion(input.schemaId, {
+    createdBy: input.actor,
+    expectedDraftRevision: draft.item.revision,
+    idempotencyKey: `cdm-sync:${input.schemaId}:${input.upstreamCommitSha}`,
+    changeSummary: `CDM re-sync ${input.upstreamCommitSha}`,
+  });
+
+  return {
+    draftRevision: draft.item.revision,
+    schemaVersion: version.item?.version,
+    schemaVersionId: version.item?.schemaVersionId,
+    replayed: version.replayed,
+    noChange: version.noChange,
+  };
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
   const correlationId = event.headers?.['x-correlation-id'] ?? event.headers?.['X-Correlation-Id'];
@@ -400,8 +436,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     let executionArn: string | undefined;
     let diffSummary: SchemaDiffSummary | undefined;
 
+    let immutableVersionInfo:
+      | {
+        readonly draftRevision: number;
+        readonly schemaVersion?: number;
+        readonly schemaVersionId?: string;
+        readonly replayed?: boolean;
+        readonly noChange?: boolean;
+      }
+      | undefined;
+
     if (metadata.format === 'json-schema') {
       const now = new Date().toISOString();
+
+      immutableVersionInfo = await materializeImmutableVersionFromSync({
+        schemaId,
+        normalizedContent,
+        upstreamCommitSha: fetched.sha,
+        actor: 'system-cdm-sync',
+      });
 
       // 1. Parse
       const parseResult = parseJsonSchema(normalizedContent, schemaId);
@@ -518,6 +571,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const syncNow = new Date().toISOString();
     await updateSyncMetadata(schemaId, { syncStatus: 'synced', lastSyncResult: 'updated', lastSyncTimestamp: syncNow, lastSyncCommitSha: fetched.sha, commitSha: fetched.sha });
     await logSyncActivityBestEffort({ schemaId, outcome: 'updated', previousCommitSha: currentCommit, currentCommitSha: fetched.sha, diffSummary });
+    console.info('[sync-cdm-schema] immutable-version-materialized', {
+      eventType: 'schema-cdm-sync-version-materialized',
+      schemaId,
+      schemaVersion: immutableVersionInfo?.schemaVersion,
+      schemaVersionId: immutableVersionInfo?.schemaVersionId,
+      draftRevision: immutableVersionInfo?.draftRevision,
+      actor: 'system-cdm-sync',
+      emittedAt: syncNow,
+      previousCommitSha: currentCommit,
+      currentCommitSha: fetched.sha,
+      replayed: immutableVersionInfo?.replayed ?? false,
+      noChange: immutableVersionInfo?.noChange ?? false,
+      affectedCount: {
+        added: diffSummary?.added.length ?? 0,
+        removed: diffSummary?.removed.length ?? 0,
+        modified: diffSummary?.modified.length ?? 0,
+      },
+    });
 
     const result: SchemaSyncResult = {
       schemaId,

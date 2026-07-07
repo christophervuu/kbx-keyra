@@ -41,6 +41,12 @@ const schemaMock = vi.hoisted(() => ({
   batchWriteSchemaNodes: vi.fn().mockResolvedValue({ written: 1, failed: 0 }),
   storeProcessedContent: vi.fn().mockResolvedValue('processed-key'),
   storeOriginalSchema: vi.fn().mockResolvedValue('original-key'),
+  saveSchemaDraftRevision: vi.fn().mockResolvedValue({ noChange: false, item: { revision: 2 } }),
+  createImmutableSchemaVersion: vi.fn().mockResolvedValue({
+    noChange: false,
+    replayed: false,
+    item: { version: 2, schemaVersionId: 'sv-2' },
+  }),
   getInlineFieldThreshold: vi.fn().mockReturnValue(500),
 }));
 
@@ -160,6 +166,12 @@ describe('sync-cdm-schema handler', () => {
     schemaMock.batchWriteSchemaNodes.mockReset().mockResolvedValue({ written: 1, failed: 0 });
     schemaMock.storeProcessedContent.mockReset().mockResolvedValue('processed-key');
     schemaMock.storeOriginalSchema.mockReset().mockResolvedValue('original-key');
+    schemaMock.saveSchemaDraftRevision.mockReset().mockResolvedValue({ noChange: false, item: { revision: 2 } });
+    schemaMock.createImmutableSchemaVersion.mockReset().mockResolvedValue({
+      noChange: false,
+      replayed: false,
+      item: { version: 2, schemaVersionId: 'sv-2' },
+    });
     schemaMock.getInlineFieldThreshold.mockReset().mockReturnValue(500);
     persistenceMock.logSyncActivity.mockReset().mockResolvedValue(undefined);
   });
@@ -190,6 +202,8 @@ describe('sync-cdm-schema handler', () => {
     expect(schemaMock.batchWriteSchemaNodes).toHaveBeenCalledTimes(1);
     expect(schemaMock.storeProcessedContent).toHaveBeenCalledTimes(1);
     expect(schemaMock.updateSchemaStatus).toHaveBeenCalledTimes(1);
+    expect(schemaMock.saveSchemaDraftRevision).toHaveBeenCalledTimes(1);
+    expect(schemaMock.createImmutableSchemaVersion).toHaveBeenCalledTimes(1);
 
     // AE-01: commit SHA is persisted after successful ingestion
     expect(schemaMock.updateSyncMetadata).toHaveBeenCalledTimes(1);

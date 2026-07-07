@@ -27,7 +27,7 @@
 8. [Data Retrieval & API Client Layer](#8-data-retrieval--api-client-layer)
 9. [Mapping Engine](#9-mapping-engine)
 10. [KeyRa DSL](#10-keyra-dsl)
-11. [Schema Management & GitHub Integration](#11-schema-management--github-integration)
+11. [Schema Management Lifecycle (FS-105)](#11-schema-management-lifecycle-fs-105)
 12. [Deployment Workflow](#12-deployment-workflow)
 13. [AI Capabilities](#13-ai-capabilities)
 14. [Backend Architecture](#14-backend-architecture)
@@ -50,7 +50,7 @@ The application provides:
 - A **visual mapping editor** powered by a custom DSL (Domain-Specific Language) for defining transformation rules. The DSL is designed to be readable and authorable by non-technical users, with guided builders for common patterns.
 - A **portable mapping engine** — a pure TypeScript library that runs identically in the browser and in AWS Lambda. Users preview transformations instantly in the browser, and can optionally execute against the server-side engine to validate production parity.
 - An **AI-assisted suggestion pipeline** backed by GitHub Models that can auto-generate mapping rules, translate natural language into DSL expressions, explain rules in plain English, and suggest fixes for errors.
-- A **two-repo GitHub integration** for schema version control — one repo for company-wide CDM (Canonical Data Model) schemas (read-only) and one for user-uploaded schemas (read-write).
+- A **schema lifecycle platform** with KeyRa-managed user schema draft/revision/version management and CDM GitHub read-only ingestion.
 - An **environment-based deployment workflow** (DEV → QA → PROD) with immutable snapshots, version history, and rollback capability. Deployed mapping configurations are consumed at runtime by a generic Lambda function orchestrated through AWS Step Functions — no code changes required to update transformation logic.
 
 The frontend is a React/TypeScript/Vite application deployed on AWS Amplify. The backend is a serverless AWS stack (API Gateway, Lambda, DynamoDB, S3, Step Functions) that handles persistence, AI orchestration, schema ingestion/retrieval, and deployment management.
@@ -115,7 +115,7 @@ This persona covers any team member who authors mappings — business analysts, 
 - **G3:** Provide a client-side preview/test loop that executes in under 2 seconds with zero backend dependency.
 - **G4:** Provide an optional server-side preview that executes against the production mapping engine, giving users confidence that their mapping will work in the actual runtime environment.
 - **G5:** Enable environment-based deployment (DEV → QA → PROD) with full audit trail and rollback capability.
-- **G6:** Integrate with GitHub for schema version control — CDM schemas read-only, non-CDM schemas read-write.
+- **G6:** Provide safe schema lifecycle management with immutable versioning for user-owned schemas in KeyRa, while keeping CDM GitHub integration read-only.
 - **G7:** Provide AI-assisted mapping features that surface as reviewable suggestions — never auto-committed.
 - **G8:** Make mappings debuggable through diagnostics with stable error codes, precise rule locations, and plain-language messages.
 - **G9:** Build a portable, UI-independent mapping engine that runs identically in the browser (preview) and in the production runtime (deployed execution).
@@ -170,9 +170,9 @@ PROJECT OVERVIEW
 ├── Project Settings (overrides for global defaults)
 │
 SUPPORTING SCREENS (accessible from global navigation)
-├── Schema Library (browse global schemas — CDM + published)
+├── Schema Library (browse schemas — CDM + user-owned)
 ├── Template Library (browse and apply mapping templates)
-├── Schema Detail (view schema, metadata, usage, sync/publish)
+├── Schema Detail (view schema family, versions, metadata, usage)
 └── Settings (global KeyRa configuration)
 ```
 
@@ -200,7 +200,7 @@ SUPPORTING SCREENS (accessible from global navigation)
 3. **Save ≠ Deploy.** Saving a mapping persists changes. Deploying creates an immutable snapshot and pushes it to an environment. These are separate, intentional actions.
 4. **Schemas are a project concern.** Schema management (linking, uploading, syncing) lives on the Project Overview, not inside the Mapping Editor.
 5. **Two levels of deployment visibility.** The Project Deployment Dashboard shows status across all mappings in a project. The Mapping Deployment Page provides the detailed diff, history, and actions for a single mapping.
-6. **Global and project-level schemas.** CDM and published schemas are global — available to any project via the Schema Library. Uploaded schemas are project-level by default — scoped to the project that uploaded them until explicitly published (promoted to global).
+6. **Schema availability and ownership.** CDM schemas are shared read-only assets. User-owned schemas are KeyRa-managed schema families; mappings select immutable versions explicitly and are never auto-upgraded.
 7. **Settings inherit.** Project-level settings override global defaults. Mappings within a project inherit the project's settings unless explicitly overridden at the mapping level.
 
 ---
@@ -220,8 +220,8 @@ SUPPORTING SCREENS (accessible from global navigation)
 | **Overview metrics**    | Total projects. Total mappings. Total global schemas. Mappings by deploy status (N in DEV, N in QA, N in PROD). Recent warnings/errors.                                                                                                                                                                                                                                                                                                                                        | `GET /projects` (aggregated)    |
 | **Project list** (tab)  | Searchable, sortable table or card grid. Columns: name, description, source schema, target schema, mapping count, last modified, deploy status summary badges. A primary "Create Project" action button in the section header. Each project row/card has actions: Edit (→ Project Overview), Delete.                                                                                                                                                                           | `GET /projects`                 |
 | **Deployments** (tab)   | Flat table of all deployments across all projects. Columns: project, mapping, DEV/QA/PROD status badges + version, last deployed timestamp, status (current / stale / not deployed), action (link → Mapping Deployment Page). Searchable and filterable by project, environment, and status. Sortable by last deployed date (default: most recent first). Stale mappings visually highlighted. Read-only — no deploy actions. See Section 6.4.1 for full column specification. | `GET /deployments` (aggregated) |
-| **Schema Library link** | Prominent navigation link (not a tab) to the Schema Library (`/schemas`). Displayed alongside or above the tabs. Shows total global schema count (CDM + published).                                                                                                                                                                                                                                                                                                            | Navigation only                 |
-| **Activity feed**       | Chronological feed: "Mapping X deployed to QA", "Schema Y synced from GitHub", "Project Z created". Filterable by: All, My Projects, CDM Updates. CDM schema updates display with a 📚 badge. If a CDM update affects a schema used in one of the user's projects, it is flagged with higher priority (e.g., "⚠ CDM schema updated — 3 projects use this schema").                                                                                                             | `GET /activity`                 |
+| **Schema Library link** | Prominent navigation link (not a tab) to the Schema Library (`/schemas`). Displayed alongside or above the tabs. Shows total available schema count (CDM + user-owned).                                                                                                                                                                                                                                                                                                         | Navigation only                 |
+| **Activity feed**       | Chronological feed: "Mapping X deployed to QA", "Schema Y version created", "Project Z created". Filterable by: All, My Projects, CDM Updates. CDM schema updates display with a 📚 badge. If a CDM update affects a schema used in one of the user's projects, it is flagged with higher priority (e.g., "⚠ CDM schema updated — 3 projects use this schema").                                                                                                             | `GET /activity`                 |
 
 #### Deploy Status Badge
 
@@ -266,62 +266,59 @@ On the home dashboard, these badges are **read-only indicators**. Clicking a pro
 
 #### Section B: Schema Management
 
-Schemas are attached to a project from one of three sources. The UI presents these as distinct options:
+Schemas are attached to a project from two canonical sources.
 
-**Option 1: Link from CDM Library (Global)**
+**Option 1: Link from CDM Library (Read-only shared)**
 - Browse company-standard schemas from the CDM GitHub repo.
-- CDM schemas are read-only — they cannot be edited or published from KeyRa.
-- CDM schemas are always global — available to any project.
+- CDM schemas are read-only in KeyRa.
+- CDM updates are ingested as immutable new versions when re-sync is run.
 - The UI shows a file browser scoped to the CDM repo.
-- Linked CDM schemas display a sync status: "Last synced 2h ago ✓ Up to date" or "⚠ Schema updated in GitHub — re-sync available."
 - Actions: View, Re-sync, Unlink from project.
 
-**Option 2: Link from Published Schemas (Global or Project-Level)**
-- Browse schemas previously published by any user to the non-CDM GitHub repo.
-- Published schemas may be global (available to any project) or project-level (scoped to their originating project).
-- Actions: View, Unlink from project.
+**Option 2: Create/Import User-Owned Schema (KeyRa lifecycle)**
+- Create from blank JSON Schema, upload JSON Schema/XSD, infer from sample JSON/XML, or duplicate existing schema family.
+- User-owned schema lifecycle is managed in KeyRa with:
+  - one active draft,
+  - draft revisions,
+  - immutable versions (`v1+`) created explicitly.
+- **Sample data handling:** If the user uploads sample JSON or sample XML, KeyRa infers initial schema structure and flags it for review.
+- Uploaded schemas are stored in original format; parser/editor support JSON Schema and XSD according to feature capability.
+- Actions: View, Edit draft, Save draft, Create version, Compare versions, Restore to draft, Deprecate version, Archive family, Remove (guarded).
 
-**Option 3: Upload New Schema**
-- File picker accepts: JSON Schema, XSD, sample JSON, sample XML.
-- **Sample data handling:** If the user uploads sample JSON or sample XML (not a formal schema), the application infers a schema from the sample data. The inferred schema is stored and used for the tree view and mapping. It is flagged as "⚠ Inferred from sample data — may be incomplete." To refine the inferred schema (e.g., mark fields as required, adjust types, add descriptions), the user navigates to the Schema Detail page (Section 6.7), where inline editing is available.
-- Uploaded schemas are stored in their original format — no automatic conversion to JSON Schema. The engine and tree view parser handle both JSON Schema and XSD natively.
-- **Scope selection:** At upload time, the user chooses whether the schema is **Global** (available to any project) or **Project-Level** (scoped to this project only). A project-level schema can later be promoted to global as an explicit action. Demotion (global → project) is not permitted since other projects may already reference the schema.
-- **Git sync is required.** Uploaded schemas can exist locally temporarily while being reviewed, but must be synced (pushed) to the non-CDM GitHub repo to be considered complete. Schemas that have not been synced display a "⚠ Not synced to GitHub" indicator.
-- Actions: View, Sync to GitHub (push), Promote to Global (if project-level), Replace, Remove.
+#### Schema Source-of-Truth Model
 
-#### Schema Sync Model
+| Schema Type | Source of truth | Behavior |
+|-------------|-----------------|----------|
+| **CDM** | GitHub CDM repo (read-only) + KeyRa-ingested immutable versions | Re-sync pulls upstream changes and creates immutable new versions in KeyRa. |
+| **User-owned** | KeyRa (DynamoDB/S3) | Draft/revision/version lifecycle is managed in KeyRa. Non-CDM publish/sync-to-GitHub is not part of canonical behavior. |
 
-| Schema Type | Direction | Behavior |
-|-------------|-----------|----------|
-| **CDM** | Git → KeyRa (pull) | KeyRa reads from the CDM repo. User clicks "Re-sync" to pull latest. KeyRa never writes to this repo. |
-| **User-uploaded (global or project-level)** | KeyRa → Git (push) | User uploads schema to KeyRa, then syncs it to the non-CDM repo. Git is the source of truth once synced. Subsequent edits in KeyRa must be re-synced. |
-
-#### Schema Sync Status Indicators
+#### Schema Status Indicators (high-level)
 
 ```
-✓ Synced                — schema matches the version in GitHub
-⚠ Not synced            — schema has never been pushed to GitHub
-⚠ Local changes         — schema has been modified since last sync (needs re-push)
-⚠ Inferred              — schema was inferred from sample data (may be incomplete)
+Draft                   — mutable working state (not mapping-selectable)
+Ready version           — immutable version selectable for mappings
+Update available        — newer version exists than current mapping pin
+Deprecated version      — selectable only via explicit reveal/warning flows
+Archived family         — hidden from default new selection; existing pins remain resolvable
 ```
 
 #### Deployment Gate
 
-**Deployments are blocked if a mapping references an unsynced schema.** The Deployment Page displays: "⚠ Schema '{name}' has not been synced to GitHub — sync required before deploying." This enforces Git as the source of truth for all schemas used in production.
+Deployments are blocked when required mapping/schema dependency checks fail (for example unresolved/invalid dependencies), but not by retired non-CDM Git sync requirements.
 
 Schema cards display:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  📄 {Schema Name}                                             │
-│  {Origin: CDM / Published / Uploaded}                         │
-│  {Scope: Global / Project-Level}                              │
+│  {Origin: CDM / User-owned}                                   │
+│  {Lifecycle: Draft / vN / Archived}                           │
 │                                                               │
-│  Source: {GitHub path or "Uploaded by @user"}                 │
+│  Source: {CDM path or "KeyRa-managed"}                        │
 │  Fields: {count}    Format: {JSON Schema / XSD / Inferred}    │
-│  {Sync status indicator}                                      │
+│  {Version/readiness status indicator}                         │
 │                                                               │
-│  [{contextual actions based on origin and sync status}]       │
+│  [{contextual lifecycle actions}]                             │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -439,7 +436,7 @@ The editor is composed of panels. The exact layout (side-by-side, tabbed, or hyb
 |----------|--------|---------------|
 | Deploy actions | Deployment requires full context (diffs, environment state, history) that the editor does not have. | Mapping Deployment Page |
 | Promote actions | Promotion is a deliberate, informed decision. | Mapping Deployment Page |
-| Schema sync/publish actions | Schema management is a project-level concern. | Project Overview |
+| Schema lifecycle actions | Schema management is a project-level concern. | Project Overview |
 | Schema structural editing | Schema editing (refining inferred schemas, adjusting types/requirements) is a schema-level concern, not a mapping concern. | Schema Detail page or Project Overview |
 
 #### Save Behavior
@@ -529,9 +526,9 @@ Displays the latest saved version of the mapping and its readiness:
 | Rule summary | Total rules, coverage percentage |
 | Validation status | "✓ No validation errors" or "⚠ N warnings" or "✗ N errors — resolve before deploying" |
 | Schema references | Source schema name, origin, version/commit. Target schema name, origin, version/commit. |
-| Schema sync status | "✓ All schemas synced" or "⚠ Schema '{name}' has not been synced to GitHub — sync required before deploying" |
+| Schema dependency status | "✓ All schema dependencies resolvable" or explicit dependency warning/block reason |
 
-If the mapping has validation errors or references an unsynced schema, the deploy actions in Section D are disabled with an explanation.
+If the mapping has validation errors or unresolved/invalid schema dependencies, the deploy actions in Section D are disabled with an explanation.
 
 ##### Section B: Environment Comparison
 
@@ -553,7 +550,7 @@ Contextual diff that answers "what exactly will change if I deploy?"
 
 - Automatically compares the latest saved version against the currently deployed version for the selected environment.
 - **Rule-level diff:** rules added, rules modified (showing before/after), rules removed.
-- **Schema-level diff:** if the schema commit SHA differs between the deployed snapshot and the current refs — fields added, removed, modified.
+- **Schema-level diff:** if immutable schema version refs differ between deployed snapshot and current refs — fields added, removed, modified.
 - "View Full Diff" expands to show a rule-by-rule comparison.
 - If no version is deployed to the target environment, the diff shows "Initial deployment — all N rules are new."
 
@@ -561,7 +558,7 @@ Contextual diff that answers "what exactly will change if I deploy?"
 
 | Action | Availability | Behavior |
 |--------|-------------|----------|
-| **Deploy to DEV** | Always available (if no validation errors and schemas are synced) | Creates a snapshot of current mapping + schema refs + engine version. Deploys to DEV. |
+| **Deploy to DEV** | Always available (if no validation errors and dependencies are deployable) | Creates a snapshot of current mapping + immutable schema refs + engine version. Deploys to DEV. |
 | **Promote DEV → QA** | Available when DEV has a deployed version newer than QA | Takes the exact snapshot from DEV and makes it active in QA. Does not create a new snapshot — reuses the same artifact. |
 | **Promote QA → PROD** | Available when QA has a deployed version newer than PROD | Takes the exact snapshot from QA and makes it active in PROD. Future: requires approval. |
 
@@ -610,7 +607,7 @@ This section is visible but non-functional. It communicates that governance is p
 
 | Concept      | Definition                                                                                                                                                                                                                        |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Snapshot** | An immutable artifact containing: the full mapping config (DSL rules), schema references (including Git commit SHAs for GitHub-linked schemas), the engine version, and a timestamp. Snapshots are never modified after creation. |
+| **Snapshot** | An immutable artifact containing: the full mapping config (DSL rules), immutable schema references (`schemaId`, `schemaVersion`, `schemaVersionId`, `contentHash`, artifact refs), the engine version, and a timestamp. Snapshots are never modified after creation. |
 | **Deploy**   | Writing a snapshot to an environment. The environment's "active" pointer moves to this snapshot.                                                                                                                                  |
 | **Promote**  | Copying an existing snapshot from one environment to another. The same artifact runs in both environments — no re-generation.                                                                                                     |
 | **Rollback** | Moving an environment's "active" pointer back to a previously deployed snapshot. No data is deleted.                                                                                                                              |
@@ -626,19 +623,18 @@ This section is visible but non-functional. It communicates that governance is p
 
 #### Content
 
-- Searchable, filterable list of all schemas (global and project-level).
-- Filter by: origin (CDM / Published / Local), format (JSON Schema / XSD / Inferred), scope (Global / Project-Level).
+- Searchable, filterable list of all schemas (CDM + user-owned schema families).
+- Filter by: origin (CDM / User-owned), format (JSON Schema / XSD / Inferred), lifecycle state (has draft / has ready versions / archived).
 - Sort by: name, field count, last modified, origin.
-- Each schema card shows: name, origin badge, scope badge (Global / Project-Level), field count, format, projects using it, sync status indicator.
+- Each schema card shows: name, origin badge, lifecycle/version summary, field count, format, projects using it, and readiness summary.
 - Clicking a schema card navigates to Schema Detail (`/schemas/:schemaId`).
 
 #### Schema Origins
 
-| Origin | Badge | Meaning | Git Status |
-|--------|-------|---------|------------|
-| CDM | 📚 CDM | Pulled from the CDM repo. Read-only. Always global. | Always synced (pulled from Git) |
-| Published | 📄 Published | User-uploaded and synced to Git. Available based on scope (global or project-level). | Synced — or "⚠ Local changes" if edited since last sync |
-| Local | 💾 Local | User-uploaded, not yet synced to Git. Temporary state. | ⚠ Not synced — must sync before any mapping referencing it can be deployed |
+| Origin | Badge | Meaning | Lifecycle Notes |
+|--------|-------|---------|-----------------|
+| CDM | 📚 CDM | Pulled from the CDM repo. Read-only in KeyRa. | Re-sync may create immutable new versions in KeyRa. |
+| User-owned | 📄 User | Created/imported in KeyRa and managed by schema family lifecycle. | Draft/revision/version lifecycle is KeyRa-native; non-CDM Git publish/sync is retired. |
 
 #### States
 
@@ -669,7 +665,7 @@ Templates are stored in DynamoDB and managed by the KeyRa team (future: communit
 
 ### 6.7 Schema Detail
 
-**Purpose:** View a single schema's full content, metadata, and usage — and for non-CDM schemas, edit its structure.
+**Purpose:** View a single schema family's full content, metadata, versions, and usage — and for user-owned schemas, edit its draft structure.
 
 **URL:** `/schemas/:schemaId`
 
@@ -679,34 +675,33 @@ Templates are stored in DynamoDB and managed by the KeyRa team (future: communit
 |-------|----------|-------|
 | Name | Yes (non-CDM only) | Display name used throughout the app |
 | Description | Yes (non-CDM only) | Free text |
-| Origin | Read-only | CDM / Published / Local |
-| Scope | Read-only (CDM). Promotable (non-CDM). | Global / Project-Level. Project-level can be promoted to global. |
+| Origin | Read-only | CDM / User-owned |
+| Lifecycle | Read-only summary + actionable controls | Draft + immutable versions + archive/deprecate states |
 | Format | Read-only | JSON Schema / XSD / Inferred |
 | Field count | Read-only | Auto-calculated from schema content |
 | Created date | Read-only | |
 | Modified date | Read-only | |
 | Updated by | Read-only | |
 
-#### Section B: Git Status
+#### Section B: Version & Source Status
 
 | Field | Content |
 |-------|---------|
-| Sync status | ✓ Synced / ⚠ Not synced / ⚠ Local changes |
-| Repository | Git repo name (if synced) |
-| Branch | Branch name |
-| Path | File path in the repo |
-| Last synced commit | Commit SHA + timestamp |
+| Source model | CDM read-only Git source or KeyRa-managed user schema lifecycle |
+| Current draft | Draft revision number + based-on version (if applicable) |
+| Latest immutable version | Version number + `schemaVersionId` + content hash summary |
+| Readiness statuses | `versionStatus`, `indexStatus`, `impactStatus`, `sampleValidationStatus` |
 
 #### Section C: Schema Tree View
 
 - Full interactive tree view of the schema (same component as the Mapping Editor's schema browsers).
 - Expand/collapse, type icons, search, required-field indicators.
-- For **non-CDM schemas**, the tree view supports inline editing (see Section D).
+- For **user-owned schemas**, the tree view supports inline editing (see Section D).
 - For **CDM schemas**, the tree view is read-only.
 
-#### Section D: Schema Editing (Non-CDM Only)
+#### Section D: Schema Editing (User-owned only)
 
-Available for Published and Local schemas. Not available for CDM schemas.
+Available for user-owned schemas. Not available for CDM schemas.
 
 **Editing capabilities:**
 
@@ -730,9 +725,9 @@ Available for Published and Local schemas. Not available for CDM schemas.
 **Editing behavior:**
 - Edits are made inline in the tree view or via a field detail panel.
 - Changes are saved to the schema on explicit "Save" action.
-- If the schema was previously synced to Git, saving marks it as "⚠ Local changes — needs re-sync."
-- A "Sync to GitHub" action is prominently available after editing to push changes back to Git.
-- Editing a schema does **not** automatically update any mappings that reference it. Mappings reference a schema version — users must re-open the Mapping Editor to pick up schema changes.
+- Saving edits creates/updates draft revisions (subject to no-change suppression).
+- Creating immutable versions is explicit (`Create version`) and is not implied by draft save.
+- Editing a schema does **not** automatically update mappings. Mappings pin immutable schema versions and require explicit upgrade flow to move pins.
 
 **Inferred schema callout:**
 - Schemas inferred from sample data display a persistent banner: "⚠ This schema was inferred from sample data and may be incomplete. Review and refine the structure before using it in mappings."
@@ -755,12 +750,15 @@ Actions depend on origin and status:
 | ------------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------- |
 | **Edit**                 | Non-CDM only                      | Enables inline editing in the tree view (Section D)                                                |
 | **Auto-describe fields** | Non-CDM only                      | AI generates human-readable descriptions for all fields. Results appear as reviewable suggestions. |
-| **Sync to GitHub**       | Local or edited Published schemas | Pushes schema to Git. Confirmation modal with path and commit message.                             |
-| **Re-sync from GitHub**  | CDM and Published schemas         | Pulls latest from Git. Shows diff if changes detected.                                             |
-| **Promote to Global**    | Project-level schemas only        | Makes schema available to all projects. One-way action.                                            |
-| **Replace file**         | Non-CDM only                      | Upload a new file to replace the schema content entirely. Re-triggers ingestion.                   |
-| **Remove**               | Non-CDM only                      | Removes schema. Blocked if any mappings reference it.                                              |
-| **View Raw**             | All                               | Shows the raw JSON Schema or XSD content                                                           |
+| **Create version**       | User-owned schemas with draft changes | Creates immutable next schema version from the selected draft revision.                           |
+| **Compare versions**     | All schemas with 2+ versions         | Shows structural diff/impact summary between selected versions.                                   |
+| **Restore to draft**     | User-owned schemas with existing versions | Replaces current draft content from a selected immutable version.                                |
+| **Re-sync from GitHub**  | CDM schemas                          | Pulls latest from CDM source; ingests as immutable new version when changed.                      |
+| **Deprecate version**    | Versioned schemas                    | Marks selected version deprecated (hidden by default for new selection).                          |
+| **Archive family**       | User-owned schemas                   | Hides family from default new selection while preserving existing pinned resolution.               |
+| **Replace file / import**| User-owned schemas                   | Imports new structure into draft lifecycle flow (does not mutate immutable versions).             |
+| **Remove**               | User-owned schemas                   | Removes schema family only when dependency guards allow; otherwise blocked with explicit blockers. |
+| **View Raw**             | All                                  | Shows the raw JSON Schema or XSD content.                                                         |
 
 ---
 
@@ -798,7 +796,7 @@ Actions depend on origin and status:
 | **Constants** | Key-value pairs shared across all mappings in this project (e.g., `COMPANY_CODE`, `DEFAULT_CURRENCY`). Individual mappings can override. | N/A (mapping-specific) |
 | **Default preview format** | JSON or XML. Overrides global display preference. | Display preferences |
 | **AI configuration** | Model tier preferences for this project (e.g., always use Tier 2 for auto-map). | AI configuration |
-| **GitHub paths** | Default folder path for publishing schemas from this project (e.g., `projects/{slug}/`). | GitHub connection |
+| **Schema defaults** | Project defaults for schema creation/import workflows and compatibility preferences. | Schema lifecycle settings |
 
 #### Inheritance Model
 
@@ -819,7 +817,7 @@ Actions depend on origin and status:
 
 ## 7. UI Responsibilities
 
-This section defines what the UI owns versus what the backend owns. The boundary is clear: **the UI is a thick client that can do meaningful work offline/locally, and calls the backend only for AI, persistence, schema indexing, deployment, server-side testing, and GitHub operations.**
+This section defines what the UI owns versus what the backend owns. The boundary is clear: **the UI is a thick client that can do meaningful work offline/locally, and calls the backend only for AI, persistence, schema indexing/lifecycle operations, deployment, and server-side testing.**
 
 ### 7.1 Client-Side Responsibilities (No Backend Required)
 
@@ -827,7 +825,7 @@ This section defines what the UI owns versus what the backend owns. The boundary
 |---------------|-------------|
 | **DSL rule authoring** | Create, edit, delete, reorder rules. Expression builder (guided + raw). Array configuration. Bulk behaviors. All edits happen in local state until explicit save. |
 | **Schema browsing** | Parse and render JSON Schema / XSD as tree views. Expand/collapse, search, type indicators, required-field highlighting. Parsing happens client-side for responsiveness. |
-| **Schema editing (non-CDM)** | Inline editing of schema structure on the Schema Detail page: mark fields as required/optional, change field types, add/remove/rename fields, add descriptions. Edits are saved to local state until explicit save, which marks the schema as "⚠ Local changes — needs re-sync." CDM schemas remain read-only. |
+| **Schema editing (user-owned)** | Inline editing of schema draft structure on the Schema Detail page: mark fields as required/optional, change field types, add/remove/rename fields, add descriptions. Draft save and version creation follow explicit lifecycle operations. CDM schemas remain read-only. |
 | **Schema inference from sample data** | When a user uploads sample JSON or sample XML, the application infers a schema structure client-side. The inferred schema is flagged as "⚠ Inferred from sample data — may be incomplete" and can be refined via schema editing. |
 | **DSL validation (inline)** | The mapping engine's `validate()` runs on every rule change. Inline errors with stable codes and user-friendly messages. No backend call. |
 | **Preview & testing (client-side)** | Execute the mapping engine in-browser against the current working mapping config. Source data input → transformed output → diff → diagnostics → trace. Zero backend dependency. This is the TTFSM-critical hot path. |
@@ -848,7 +846,7 @@ This section defines what the UI owns versus what the backend owns. The boundary
 | **Server-side preview & testing** | Execute sample data against a deployed mapping in a specific environment by invoking that environment's generic mapping Lambda directly. The user selects an environment (DEV / QA / PROD) and provides sample source data. KeyRa's backend calls the target environment's URL with the `mappingId` + `sourceData`. The environment's Lambda retrieves its own active snapshot and executes the mapping engine — the exact same code path that production traffic follows. Returns the transformed output + diagnostics. This lets users answer: "What would this payload look like if it went through the mapping currently deployed in QA?" — without deploying or modifying anything. |
 | **AI features** | All AI calls go through API Gateway → Lambda → GitHub Models. The UI never calls GitHub Models directly. Includes: auto-map, NL → DSL, explain rule, smart fix, AI validation, and AI-assisted field descriptions. |
 | **Deployment** | Deploy, promote, and rollback actions call the backend to create/manage immutable snapshots and write them to target environment resources. |
-| **GitHub operations** | List CDM/non-CDM repo files, link schemas, sync schemas, publish schemas. All via backend Lambdas that call the GitHub API. |
+| **GitHub operations** | CDM-only file listing/link/re-sync operations. Non-CDM user-schema publish/sync-to-GitHub is retired from canonical flows. |
 | **Activity feed** | Fetch activity entries from the backend. Activity entries are written by backend Lambdas when actions occur (deployments, schema syncs, project creation, etc.) — the UI does not write activity entries directly. |
 
 ### 7.3 Client-Side vs Server-Side Preview
@@ -939,10 +937,12 @@ interface ApiAdapter {
   linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata>;
   syncCdmSchema(schemaId: string): Promise<SchemaSyncResult>;
 
-  // ── GitHub: Non-CDM Repo (read-write) ────────
-  listPublishedSchemas(path?: string): Promise<GitHubFile[]>;
-  publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void>;
-  linkPublishedSchema(input: LinkPublishedSchemaInput): Promise<SchemaMetadata>;
+  // ── Schema lifecycle (user-owned, KeyRa-native) ─────────────
+  saveSchemaDraft(schemaId: string, input: SaveSchemaDraftInput): Promise<SchemaDraftResult>;
+  createSchemaVersion(schemaId: string, input: CreateSchemaVersionInput): Promise<CreateSchemaVersionResult>;
+  listSchemaVersions(schemaId: string): Promise<SchemaVersionSummary[]>;
+  compareSchemaVersions(schemaId: string, fromVersion: number, toVersion: number): Promise<SchemaVersionDiff>;
+  restoreSchemaDraftFromVersion(schemaId: string, version: number): Promise<SchemaDraftResult>;
 
   // ── AI ───────────────────────────────────────
   autoMap(input: AutoMapInput): Promise<AutoMapResult>;
@@ -1075,8 +1075,18 @@ The mapping config is a versioned JSON document:
   "name": "Invoice Header Mapping",
   "version": 7,
   "engineVersion": "2.0.0",
-  "sourceSchemaRef": { "schemaId": "abc123", "type": "github", "commitSha": "def456" },
-  "targetSchemaRef": { "schemaId": "xyz789", "type": "github", "commitSha": "ghi012" },
+  "sourceSchemaRef": {
+    "schemaId": "abc123",
+    "schemaVersion": 4,
+    "schemaVersionId": "e2d9d786-61df-4c12-9e09-2b8843cf78c4",
+    "contentHash": "sha256:3f6e..."
+  },
+  "targetSchemaRef": {
+    "schemaId": "xyz789",
+    "schemaVersion": 7,
+    "schemaVersionId": "d12f7e6c-f74a-4a96-a6fb-849fa867e4f5",
+    "contentHash": "sha256:8a2b..."
+  },
   "config": {
     "unmappedTargets": "null",
     "nullSubtrees": ["Order.Parties.BillTo"],
@@ -1135,115 +1145,66 @@ The KeyRa DSL is a declarative expression language for defining data transformat
 
 The complete DSL grammar, function catalog, type system, and error codes are defined in a separate document: `specs/KEYRA-DSL-SPECIFICATION.md`. The mapping engine implements this specification. The AI prompt registry includes the DSL reference so that GitHub Models generates valid KeyRa DSL expressions.
 
+FS-105 note: DSL expression grammar remains unchanged. The mapping configuration schema-reference contract is updated to immutable version pinning (`schemaVersion`, `schemaVersionId`, `contentHash`).
+
 ---
 
-## 11. Schema Management & GitHub Integration
+## 11. Schema Management Lifecycle (FS-105)
 
-### 11.1 Two-Repo Model
+### 11.1 FS-105 superseding note
 
-KeyRa integrates with two GitHub repositories for schema version control:
+This section supersedes prior non-CDM publish/sync-to-GitHub contracts for user-owned schemas.
 
-#### Repo 1: CDM Schemas — `KBXT/CDM-Schemas`
+- User-owned schemas are KeyRa-managed lifecycle entities (DynamoDB/S3 source of truth).
+- Non-CDM user-schema publish/sync-to-GitHub behavior is retired from canonical product behavior.
+- CDM GitHub integration remains read-only and is not changed by FS-105.
 
-| Aspect | Detail |
-|--------|--------|
-| Purpose | Company-wide canonical data models. Single source of truth for target schemas. |
-| Managed by | CDM/DCA team — external to KeyRa. |
-| KeyRa's access | **Read-only.** KeyRa links to files, syncs them, and indexes them. KeyRa never writes to this repo. |
-| Folder structure | Managed by the CDM team. No convention enforced by KeyRa. |
-| Schema lifecycle | CDM team updates schema → pushes to repo → KeyRa detects change (manual re-sync or future webhook) → re-ingests retrieval-ready nodes into DynamoDB. |
-| UI surface | "Link CDM Schema" button on Project Overview → file browser scoped to this repo. "Re-sync" button on linked schemas. |
+### 11.2 Canonical schema lifecycle model
 
-#### Repo 2: Non-CDM Schemas — `KBXT/KeyRa-Schemas`
+User-owned schemas follow schema-family lifecycle semantics:
 
-| Aspect           | Detail                                                                                                                                                  |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Purpose          | Version-controlled storage for all source schemas and non-CDM target schemas uploaded by BAs.                                                           |
-| Managed by       | KeyRa users — through the KeyRa UI.                                                                                                                     |
-| KeyRa's access   | **Read-write.** KeyRa reads schemas from this repo (for reuse) and writes schemas to it (when a BA publishes).                                          |
-| Folder structure | Enforced by the KeyRa UI when publishing.                                                                                                               |
-| Schema lifecycle | BA uploads schema → saved locally → BA reviews → BA clicks "Publish to GitHub" → KeyRa commits to repo with structured path.                            |
-| UI surface       | "Upload Schema" saves locally. "Publish to GitHub" commits to repo (explicit action with confirmation). "Browse Published Schemas" shows repo contents. |
+1. Create/import schema family → mutable draft.
+2. Save draft revisions (no new immutable version unless content changed and user explicitly versions).
+3. Create immutable versions (`v1+`) explicitly.
+4. Mapping refs pin immutable versions; no automatic upgrades.
+5. Archive/deprecate lifecycle controls manage selection/visibility without breaking existing pinned mappings.
 
-### 11.2 Non-CDM Repo Folder Structure
+### 11.3 CDM model (unchanged in principle)
 
-The UI constructs the file path automatically when a BA publishes a schema. The default convention is:
+CDM schemas remain external read-only assets:
 
-```
-KBXT/KeyRa-Schemas/
-├── projects/
-│   ├── {project-slug}/
-│   │   ├── {SchemaName}.json
-│   │   └── {SchemaName}.json
-│   └── {project-slug}/
-│       └── {SchemaName}.json
-└── shared/
-    ├── {SchemaName}.json
-    └── {SchemaName}.json
-```
+- KeyRa reads from CDM repo, never writes.
+- Re-sync pulls upstream changes and creates immutable new KeyRa versions.
+- Existing mapping pins remain unchanged until explicit upgrade flow is completed.
 
-- `projects/{project-slug}/` — schemas used by a specific project.
-- `shared/` — schemas reusable across multiple projects.
+### 11.4 Deployment snapshot schema references
 
-The BA can override the auto-generated path if needed (e.g., move a schema from project-specific to shared).
-
-### 11.3 Publish to GitHub Flow
-
-Publishing is always an explicit BA action. It is never automatic.
-
-1. BA clicks "Publish to GitHub" on a local-only schema in the Project Overview.
-2. A confirmation modal shows:
-   - Schema name and field count.
-   - Target repository (`KBXT/KeyRa-Schemas`).
-   - Auto-generated file path (e.g., `projects/invoice-mapping/CarrierRateSheet.json`).
-   - Editable commit message (default generated from schema name).
-   - Option to publish to `projects/{slug}/` or `shared/`.
-   - Warning: "This will commit the schema to the shared repository. Other team members will be able to see and use it."
-3. BA confirms. Lambda commits the file to the repo via the GitHub API.
-4. Schema metadata in DynamoDB is updated with GitHub source info (repo, branch, path, commit SHA).
-5. Schema card in the UI updates to show "✓ Published to GitHub" with the path.
-
-### 11.4 Schema Sync Flow
-
-For GitHub-linked schemas (both CDM and non-CDM):
-
-1. BA clicks "Re-sync" on a schema card, or sync is triggered by a webhook (future).
-2. Lambda fetches the current file from GitHub.
-3. Compares commit SHA. If unchanged, returns "No changes."
-4. If changed: re-ingests the schema (re-parses into tree nodes, re-generates retrieval signals/embeddings, updates DynamoDB).
-5. Returns a diff summary: fields added, removed, modified.
-6. UI updates the sync status and shows the diff summary.
-
-### 11.5 Schema Reference in Deployment Snapshots
-
-When a mapping is deployed, the deployment snapshot locks schema references to specific versions:
+When a mapping is deployed, the deployment snapshot locks immutable schema references:
 
 ```json
 {
   "sourceSchemaRef": {
     "schemaId": "abc123",
-    "source": {
-      "type": "github",
-      "repo": "KBXT/KeyRa-Schemas",
-      "branch": "main",
-      "path": "projects/invoice-mapping/APSettlement.json",
-      "commitSha": "a1b2c3d4"
-    }
+    "schemaVersion": 4,
+    "schemaVersionId": "e2d9d786-61df-4c12-9e09-2b8843cf78c4",
+    "contentHash": "sha256:3f6e..."
   },
   "targetSchemaRef": {
     "schemaId": "xyz789",
-    "source": {
-      "type": "github",
-      "repo": "KBXT/CDM-Schemas",
-      "branch": "main",
-      "path": "ShipmentOrder.json",
-      "commitSha": "e5f6g7h8"
-    }
+    "schemaVersion": 7,
+    "schemaVersionId": "d12f7e6c-f74a-4a96-a6fb-849fa867e4f5",
+    "contentHash": "sha256:8a2b..."
   }
 }
 ```
 
-This ensures that production environments run against known, immutable schema versions. If a schema is updated in GitHub, the deployed mapping continues to reference the old commit until explicitly re-deployed.
+Runtime executes against immutable snapshot/artifact references and does not resolve mutable latest schema state.
+
+### 11.5 Mapping DSL compatibility boundary
+
+FS-105 does not change DSL expression grammar. It changes mapping configuration schema-reference contracts to immutable version pinning semantics.
+
+
 
 ---
 
@@ -1254,7 +1215,7 @@ This ensures that production environments run against known, immutable schema ve
 | Concept | Definition |
 |---------|-----------|
 | **Version** | An auto-incrementing integer assigned to a mapping config each time it is saved. BAs see "v1", "v2", "v3". |
-| **Snapshot** | An immutable artifact created at deploy time. Contains: full mapping config (DSL rules), schema references (with commit SHAs), engine version, and creation timestamp. Snapshots are never modified after creation. Stored in S3. |
+| **Snapshot** | An immutable artifact created at deploy time. Contains: full mapping config (DSL rules), immutable schema references (`schemaId`, `schemaVersion`, `schemaVersionId`, `contentHash`, artifact refs), engine version, and creation timestamp. Snapshots are never modified after creation. Stored in S3. |
 | **Environment** | One of: `DEV`, `QA`, `PROD`. Each environment has an "active snapshot" pointer. |
 | **Deploy** | Create a snapshot from the latest saved mapping config and make it the active snapshot in a target environment. |
 | **Promote** | Copy an existing snapshot from one environment to another. The same artifact runs in both — no re-generation. |
@@ -1275,7 +1236,7 @@ UI calls POST /mappings/:id/deploy { environment: "DEV" }
        ▼
 Lambda: deployMapping
   1. Read current mapping config from storage.
-  2. Read current schema refs (including GitHub commit SHAs).
+  2. Read current immutable schema refs (`schemaId`, `schemaVersion`, `schemaVersionId`, `contentHash`).
   3. Bundle into an immutable snapshot JSON.
   4. Write snapshot to S3.
   5. Write deployment record to DynamoDB (Deployments table).
@@ -1603,8 +1564,8 @@ Storage: DynamoDB table (`PromptRegistry`) or a versioned JSON file in S3. For P
                     ▼                                       ▼
    ┌──────────────────────┐              ┌──────────────────────┐
    │  DynamoDB Retrieval  │              │  GitHub API          │
-   │  Signals + Rerank    │              │  (CDM + non-CDM      │
-   │  (in Lambda runtime) │              │   repos)             │
+   │  Signals + Rerank    │              │  (CDM repo read-only │
+   │  (in Lambda runtime) │              │   ingestion)         │
    └──────────────────────┘              └──────────────────────┘
 
    ┌──────────────────────────────────────────────────────────┐
@@ -1624,7 +1585,7 @@ Storage: DynamoDB table (`PromptRegistry`) or a versioned JSON file in S3. For P
 | **S3** | Bulk storage for objects exceeding DynamoDB's 400KB limit: full schema content, deployment snapshots, project export bundles, large test case data. |
 | **Step Functions** | Orchestrates long-running operations that exceed Lambda's 29s API Gateway timeout: large schema ingestion (23k fields → parse → retrieval-ready write) and full auto-map on large schemas (parallel chunk processing). |
 | **GitHub Models** | LLM inference and embeddings. Called by Lambdas only. Provides Tier 1 (gpt-4.1-mini), Tier 2 (gpt-4.1), and embeddings (text-embedding-3-small). |
-| **GitHub API** | Accessed by Lambdas to read/write schema files in `KBXT/CDM-Schemas` (read-only) and `KBXT/KeyRa-Schemas` (read-write). Authentication via GitHub App token or PAT stored in Secrets Manager. |
+| **GitHub API** | Accessed by Lambdas for CDM schema read-only ingestion flows. Non-CDM user-schema lifecycle is KeyRa-native and does not require publish/sync-to-GitHub. Authentication via GitHub App token or PAT stored in Secrets Manager. |
 
 ### 14.3 Lambda Functions
 
@@ -1679,10 +1640,10 @@ All AI Lambdas read their prompt configuration (system message, user message tem
 |--------|---------|---------------|
 | `listCdmFiles` | `GET /github/cdm/files` | Reads file listing from CDM repo via GitHub API. Cached (5 min TTL). |
 | `linkCdmSchema` | `POST /schemas/link-cdm` | Fetches file from CDM repo. Passes to ingestion pipeline. Stores GitHub source metadata. |
-| `syncSchema` | `POST /schemas/:id/sync-cdm` | Fetches current file from GitHub. Compares commit SHA. Re-ingests if changed. |
-| `listPublishedFiles` | `GET /github/schemas/files` | Reads file listing from non-CDM repo. Cached (1 min TTL). |
-| `publishSchema` | `POST /schemas/:id/publish` | Reads schema from S3. Commits to non-CDM repo via GitHub API. Updates DynamoDB metadata. |
-| `linkPublishedSchema` | `POST /schemas/link-published` | Links an existing file in the non-CDM repo to a project. |
+| `syncSchema` | `POST /schemas/:id/sync-cdm` | Fetches current file from CDM GitHub source. Creates immutable new KeyRa version when changed. |
+| `saveSchemaDraft` | `PUT /schemas/:id/draft` | Saves mutable schema draft revision with OCC/no-change safeguards. |
+| `createSchemaVersion` | `POST /schemas/:id/versions` | Creates immutable schema version from draft revision (`schemaVersionId`, `contentHash`). |
+| `compareSchemaVersions` | `GET /schemas/:id/versions/diff` | Returns deterministic structural diff/impact summary between two immutable versions. |
 
 #### Preview Lambdas
 
@@ -1729,9 +1690,9 @@ Stores the tree representation of every ingested schema.
 | `name` | String | Display name |
 | `format` | String | `json-schema` or `xsd` |
 | `fieldCount` | Number | Total leaf fields |
-| `origin` | String | `cdm`, `published`, or `local` |
-| `status` | String | `ingesting`, `ready`, `error` |
-| `source` | Map | GitHub source info (repo, branch, path, commitSha) or `{ type: "upload" }` |
+| `origin` | String | `cdm` or `user` |
+| `status` | String | `processing`, `ready`, `needs_review`, `error` |
+| `source` | Map | CDM GitHub source metadata (read-only) or KeyRa lifecycle metadata for user-owned schemas |
 | `createdAt` | String | ISO 8601 |
 | `updatedAt` | String | ISO 8601 |
 
@@ -1743,7 +1704,7 @@ Stores the tree representation of every ingested schema.
 | `name` | String | |
 | `description` | String | |
 | `slug` | String | URL-safe, used for GitHub folder paths |
-| `schemaRefs` | List | Schema IDs attached to this project |
+| `schemaRefs` | List | Schema IDs attached to this project (compatibility shape; canonical refs are lifecycle/version aware) |
 | `tags` | List | For filtering |
 | `createdAt` | String | |
 | `updatedAt` | String | |
@@ -1910,12 +1871,10 @@ GET    /mappings/:id/diff              Diff between two versions
 ── GitHub: CDM Repo (read-only) ────────────────────────
 GET    /github/cdm/files               List files in CDM repo
 POST   /schemas/link-cdm               Link CDM schema to project
-POST   /schemas/:id/sync-cdm           Re-sync CDM schema
-
-── GitHub: Non-CDM Repo (read-write) ───────────────────
-GET    /github/schemas/files           List files in non-CDM repo
-POST   /schemas/:id/publish            Publish schema to GitHub
-POST   /schemas/link-published         Link published schema
+POST   /schemas/:id/sync-cdm           Re-sync CDM schema (read-only source)
+PUT    /schemas/:id/draft              Save schema draft revision
+POST   /schemas/:id/versions           Create immutable schema version
+GET    /schemas/:id/versions/diff      Compare immutable schema versions
 
 ── AI ──────────────────────────────────────────────────
 POST   /ai/auto-map                    Generate mapping rules
@@ -2039,15 +1998,14 @@ POST   /mappings/:id/preview           Execute sample data against a deployed sn
 **Features:**
 - Link CDM schemas from `KBXT/CDM-Schemas` (read-only).
 - Re-sync CDM schemas.
-- Upload and publish non-CDM schemas to `KBXT/KeyRa-Schemas`.
-- Browse published schemas for reuse.
-- Structured folder paths enforced by UI.
+- Create/import user-owned schemas and manage draft/revision/version lifecycle in KeyRa.
+- Browse schema families/versions for reuse.
 
-**Backend needed:** GitHub API Lambdas, Secrets Manager for GitHub credentials.
+**Backend needed:** CDM GitHub read Lambdas, schema lifecycle APIs, persistence/versioning services.
 
 **Acceptance criteria:**
-- Given a BA links a CDM schema, when the CDM team pushes an update and the BA clicks Re-sync, then the schema is re-ingested and the diff summary shows fields added/removed.
-- Given a BA uploads a schema and clicks "Publish to GitHub", when the commit succeeds, then the file exists at `projects/{slug}/{name}.json` in the non-CDM repo.
+- Given a BA links a CDM schema, when the CDM team pushes an update and the BA clicks Re-sync, then a new immutable KeyRa version is created and the diff summary shows fields added/removed.
+- Given a BA edits a user-owned schema draft and clicks "Create version", then a new immutable schema version is created and existing mapping pins remain unchanged until explicit upgrade.
 
 ### Phase 4: Deployment Workflow
 

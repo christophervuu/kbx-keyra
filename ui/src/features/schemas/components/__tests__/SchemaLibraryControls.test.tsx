@@ -73,9 +73,11 @@ describe('SchemaLibraryFiltersPanel', () => {
     ownerships: [] as Array<'cdm' | 'user'>,
     dataFormats: [] as Array<'JSON' | 'XML'>,
     statuses: [] as Array<'ready' | 'processing' | 'error'>,
+    lifecycles: [] as Array<'draft' | 'versioned' | 'archived'>,
     onToggleOwnership: noop,
     onToggleDataFormat: noop,
     onToggleStatus: noop,
+    onToggleLifecycle: noop,
   };
 
   it('renders ownership options only', () => {
@@ -106,6 +108,14 @@ describe('SchemaLibraryFiltersPanel', () => {
     expect(within(statusGroup).getByRole('button', { name: 'Error' })).toBeInTheDocument();
   });
 
+  it('renders lifecycle options', () => {
+    render(<SchemaLibraryFiltersPanel {...defaultProps} />);
+    const lifecycleGroup = screen.getByRole('group', { name: 'Filter by lifecycle' });
+    expect(within(lifecycleGroup).getByRole('button', { name: 'Draft only' })).toBeInTheDocument();
+    expect(within(lifecycleGroup).getByRole('button', { name: 'Versioned' })).toBeInTheDocument();
+    expect(within(lifecycleGroup).getByRole('button', { name: 'Archived' })).toBeInTheDocument();
+  });
+
   it('calls onToggleOwnership when ownership button clicked', async () => {
     const onToggleOwnership = vi.fn();
     render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleOwnership={onToggleOwnership} />);
@@ -125,6 +135,13 @@ describe('SchemaLibraryFiltersPanel', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleStatus={onToggleStatus} />);
     await userEvent.click(screen.getByRole('button', { name: 'Error' }));
     expect(onToggleStatus).toHaveBeenCalledWith('error');
+  });
+
+  it('calls onToggleLifecycle when lifecycle button clicked', async () => {
+    const onToggleLifecycle = vi.fn();
+    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleLifecycle={onToggleLifecycle} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    expect(onToggleLifecycle).toHaveBeenCalledWith('archived');
   });
 
   it('active ownership button has aria-pressed=true', () => {
@@ -151,6 +168,7 @@ describe('SchemaLibraryFiltersPanel', () => {
     expect(screen.getByRole('group', { name: 'Filter by ownership' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Filter by data format' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Filter by status' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Filter by lifecycle' })).toBeInTheDocument();
   });
 });
 
@@ -200,9 +218,11 @@ describe('ActiveFilterChips', () => {
     ownerships: [] as Array<'cdm' | 'user'>,
     dataFormats: [] as Array<'JSON' | 'XML'>,
     statuses: [] as Array<'ready' | 'processing' | 'error'>,
+    lifecycles: [] as Array<'draft' | 'versioned' | 'archived'>,
     onRemoveOwnership: vi.fn(),
     onRemoveDataFormat: vi.fn(),
     onRemoveStatus: vi.fn(),
+    onRemoveLifecycle: vi.fn(),
     onClearAll: vi.fn(),
   };
 
@@ -227,6 +247,11 @@ describe('ActiveFilterChips', () => {
     expect(screen.getByTestId('filter-chip')).toHaveTextContent('Ready');
   });
 
+  it('renders chips for active lifecycle filters', () => {
+    render(<ActiveFilterChips {...emptyProps} lifecycles={['archived']} />);
+    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Archived');
+  });
+
   it('× button on ownership chip calls onRemoveOwnership', async () => {
     const onRemoveOwnership = vi.fn();
     render(<ActiveFilterChips {...emptyProps} ownerships={['cdm']} onRemoveOwnership={onRemoveOwnership} />);
@@ -248,6 +273,13 @@ describe('ActiveFilterChips', () => {
     render(<ActiveFilterChips {...emptyProps} statuses={['error']} onRemoveStatus={onRemoveStatus} />);
     await userEvent.click(screen.getByRole('button', { name: 'Remove Error filter' }));
     expect(onRemoveStatus).toHaveBeenCalledWith('error');
+  });
+
+  it('× button on lifecycle chip calls onRemoveLifecycle', async () => {
+    const onRemoveLifecycle = vi.fn();
+    render(<ActiveFilterChips {...emptyProps} lifecycles={['versioned']} onRemoveLifecycle={onRemoveLifecycle} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Versioned filter' }));
+    expect(onRemoveLifecycle).toHaveBeenCalledWith('versioned');
   });
 
   it('shows Clear all button when filters are active', () => {

@@ -21,6 +21,7 @@ const sharedMocks = vi.hoisted(() => {
     getItem: vi.fn(),
     putObject: vi.fn(),
     updateItem: vi.fn(),
+    getObject: vi.fn(),
     jsonResponse: vi.fn(),
     errorResponse: vi.fn(),
     notFound: vi.fn(),
@@ -31,7 +32,18 @@ const sharedMocks = vi.hoisted(() => {
   };
 });
 
+const patchEngineMocks = vi.hoisted(() => ({
+  applySchemaPatches: vi.fn(),
+  SchemaPatchError: class SchemaPatchError extends Error {
+    constructor(public readonly kind: 'validation' | 'unsupported', message: string) {
+      super(message);
+      this.name = 'SchemaPatchError';
+    }
+  },
+}));
+
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
+vi.mock('../../../src/lib/schema/patch-engine.js', () => patchEngineMocks);
 
 async function importHandler() {
   return import('../../../src/lambda/schema/update-schema.js');
@@ -107,6 +119,17 @@ describe('update-schema handler', () => {
     }));
     sharedMocks.notFound.mockReset().mockReturnValue({ code: 'RESOURCE_NOT_FOUND', message: "Schema with id 'schema-1' not found", statusCode: 404, retryable: false, requestId: 'req-missing' });
     sharedMocks.internalError.mockReset().mockReturnValue({ code: 'INTERNAL_ERROR', message: 'err', statusCode: 500, retryable: true, requestId: 'req-internal' });
+    sharedMocks.getObject.mockReset().mockResolvedValue(
+      JSON.stringify({ type: 'object', properties: { invoiceId: { type: 'string' } } }),
+    );
+    patchEngineMocks.applySchemaPatches.mockReset().mockReturnValue({
+      content: {
+        type: 'object',
+        properties: {
+          invoiceId: { type: 'string', description: 'patched' },
+        },
+      },
+    });
   });
 
   it('updates metadata and content and returns normalized schema metadata', async () => {
@@ -192,6 +215,78 @@ describe('update-schema handler', () => {
       503,
       true,
       'req-s3',
+    );
+  });
+
+  it('applies JSON Pointer patches through patch engine for json-schema content', async () => {
+    sharedMocks.parseBody.mockReturnValueOnce({
+      patches: [
+        {
+          op: 'set',
+          pointer: '/properties/invoiceId/description',
+          value: 'Invoice identifier',
+        },
+      ],
+      fieldCount: 1,
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } } as never);
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.getObject).toHaveBeenCalledWith({
+      Bucket: 'Content',
+      Key: 'schemas/schema-1/content.json',
+    });
+    expect(patchEngineMocks.applySchemaPatches).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patches: expect.arrayContaining([
+          expect.objectContaining({
+            op: 'set',
+            pointer: '/properties/invoiceId/description',
+          }),
+        ]),
+      }),
+    );
+    expect(sharedMocks.putObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns deterministic validation error when patch engine rejects unsupported operation', async () => {
+    sharedMocks.parseBody.mockReturnValueOnce({
+      patches: [{ op: 'set', pointer: '/allOf/0', value: {} }],
+      fieldCount: 1,
+    });
+    patchEngineMocks.applySchemaPatches.mockImplementationOnce(() => {
+      throw new patchEngineMocks.SchemaPatchError('unsupported', 'Unsupported schema patch operation at /allOf/0');
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } } as never);
+
+    expect(result.statusCode).toBe(400);
+    expect(sharedMocks.errorResponse).toHaveBeenCalledWith(
+      'VALIDATION_ERROR',
+      'Unsupported schema patch operation at /allOf/0',
+      400,
+      false,
+    );
+  });
+
+  it('blocks patch+content mixed request', async () => {
+    sharedMocks.parseBody.mockReturnValueOnce({
+      content: { type: 'object' },
+      patches: [{ op: 'set', pointer: '/type', value: 'object' }],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } } as never);
+
+    expect(result.statusCode).toBe(400);
+    expect(sharedMocks.errorResponse).toHaveBeenCalledWith(
+      'VALIDATION_ERROR',
+      'Provide either content or patches, not both',
+      400,
+      false,
     );
   });
 });

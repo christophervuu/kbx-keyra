@@ -16,9 +16,12 @@ import { toAppError } from '@/lib/state/app-error';
 import type {
   AddSchemaSampleInput,
   AddSchemaSampleResult,
+  CreateSchemaVersionResult,
   ParsedSchema,
   SchemaDetail,
+  SchemaDraftRevision,
   SchemaSamplePayloadContent,
+  SchemaVersionEntry,
   UpdateSchemaInput,
 } from '@/lib/types';
 
@@ -36,7 +39,11 @@ export interface UseSchemaDetailResult {
   markReviewed: () => Promise<void>;
   addSample: (input: AddSchemaSampleInput) => Promise<AddSchemaSampleResult>;
   deleteSample: (sampleId: string) => Promise<void>;
+  setDefaultSample: (sampleId: string | null) => Promise<void>;
   getSamplePayload: (sampleId: string) => Promise<SchemaSamplePayloadContent>;
+  draftRevisions: readonly SchemaDraftRevision[];
+  schemaVersions: readonly SchemaVersionEntry[];
+  createVersion: (expectedDraftRevision: number) => Promise<CreateSchemaVersionResult>;
 }
 
 interface SchemaDetailQueryData {
@@ -56,6 +63,36 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
     gcTime: queryPolicies.schemaDetail.gcTime,
     retry: false,
     queryFn: () => loadSchemaDetailData(adapter, schemaId),
+  });
+
+  const versionsQuery = useQuery<SchemaVersionEntry[]>({
+    queryKey: [...detailQueryKey, 'versions'],
+    enabled: typeof adapter.listSchemaVersions === 'function',
+    staleTime: queryPolicies.schemaDetail.staleTime,
+    gcTime: queryPolicies.schemaDetail.gcTime,
+    retry: false,
+    queryFn: async () => {
+      if (typeof adapter.listSchemaVersions !== 'function') {
+        return [];
+      }
+
+      return adapter.listSchemaVersions(schemaId);
+    },
+  });
+
+  const draftRevisionsQuery = useQuery<SchemaDraftRevision[]>({
+    queryKey: [...detailQueryKey, 'draft-revisions'],
+    enabled: typeof adapter.listSchemaDraftRevisions === 'function',
+    staleTime: queryPolicies.schemaDetail.staleTime,
+    gcTime: queryPolicies.schemaDetail.gcTime,
+    retry: false,
+    queryFn: async () => {
+      if (typeof adapter.listSchemaDraftRevisions !== 'function') {
+        return [];
+      }
+
+      return adapter.listSchemaDraftRevisions(schemaId);
+    },
   });
 
   const patchDetailData = useCallback(
@@ -172,6 +209,27 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
     invalidateSchemaDependents(queryClient, schemaId);
   }, [adapter, queryClient, schemaId]);
 
+  const setDefaultSample = useCallback(async (sampleId: string | null) => {
+    if (typeof adapter.setDefaultSchemaSample !== 'function') {
+      throw new Error('Setting schema default sample is not available in this mode.');
+    }
+
+    await cancelSchemaDetailReads(queryClient, schemaId);
+    await adapter.setDefaultSchemaSample(schemaId, { sampleId });
+    invalidateSchemaDependents(queryClient, schemaId);
+  }, [adapter, queryClient, schemaId]);
+
+  const createVersion = useCallback(async (expectedDraftRevision: number) => {
+    if (typeof adapter.createSchemaVersion !== 'function') {
+      throw new Error('Creating schema versions is not available in this mode.');
+    }
+
+    await cancelSchemaDetailReads(queryClient, schemaId);
+    const result = await adapter.createSchemaVersion(schemaId, { expectedDraftRevision });
+    invalidateSchemaDependents(queryClient, schemaId);
+    return result;
+  }, [adapter, queryClient, schemaId]);
+
   const getSamplePayload = useCallback(async (sampleId: string) => {
     if (typeof adapter.getSchemaSamplePayload !== 'function') {
       throw new Error('Loading schema sample payloads is not available in this mode.');
@@ -198,6 +256,10 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
     markReviewed,
     addSample,
     deleteSample,
+    setDefaultSample,
     getSamplePayload,
+    draftRevisions: draftRevisionsQuery.data ?? [],
+    schemaVersions: versionsQuery.data ?? [],
+    createVersion,
   };
 }

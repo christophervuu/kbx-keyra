@@ -178,6 +178,57 @@ describe('useSchemaLibrary', () => {
     expect(item.ownership).toBe('user');
     expect(item.dataFormat).toBe('JSON');
     expect(item.status).toBe('ready');
+    expect(item.lifecycle).toBe('draft');
+    expect(item.latestVersion).toBe(0);
+    expect(item.draftRevision).toBeNull();
+  });
+
+  it('derives lifecycle metadata from versions and draft revisions', async () => {
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([
+        makeSchemaMeta({ schemaId: 'schema-v', name: 'Versioned Schema' }),
+      ]),
+      listProjects: vi.fn().mockResolvedValue([]),
+      listSchemaVersions: vi.fn().mockResolvedValue([
+        {
+          schemaId: 'schema-v',
+          version: 2,
+          schemaVersionId: 'sv-2',
+          draftRevision: 4,
+          basedOnVersion: 1,
+          contentHash: 'hash-2',
+          versionStatus: 'ready',
+          indexStatus: 'ready',
+          impactStatus: 'ready',
+          sampleValidationStatus: 'ready',
+          createdAt: '2026-01-01T00:00:00Z',
+          createdBy: 'local-user',
+        },
+      ]),
+      listSchemaDraftRevisions: vi.fn().mockResolvedValue([
+        {
+          schemaId: 'schema-v',
+          revision: 7,
+          basedOnVersion: 2,
+          contentHash: 'hash-d-7',
+          savedAt: '2026-01-02T00:00:00Z',
+          savedBy: 'local-user',
+        },
+      ]),
+    });
+
+    const { result } = renderHook(() => useSchemaLibrary(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(result.current.items[0]).toMatchObject({
+      lifecycle: 'versioned',
+      latestVersion: 2,
+      draftRevision: 7,
+      archived: false,
+    });
   });
 
   it('uses totalFieldCount as fallback when fieldCount is zero', async () => {
@@ -453,6 +504,47 @@ describe('useSchemaLibrary', () => {
       expect(result.current.filteredItems[0].schemaId).toBe('1');
     });
 
+    it('toggleLifecycleFilter filters by lifecycle', async () => {
+      const adapter = createMockAdapter({
+        listSchemas: vi.fn().mockResolvedValue([
+          makeSchemaMeta({ schemaId: '1', name: 'Alpha' }),
+          makeSchemaMeta({ schemaId: '2', name: 'Beta' }),
+        ]),
+        listProjects: vi.fn().mockResolvedValue([]),
+        listSchemaVersions: vi.fn()
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([
+            {
+              schemaId: '2',
+              version: 1,
+              schemaVersionId: 'sv-1',
+              draftRevision: 1,
+              basedOnVersion: null,
+              contentHash: 'hash',
+              versionStatus: 'ready',
+              indexStatus: 'ready',
+              impactStatus: 'ready',
+              sampleValidationStatus: 'ready',
+              createdAt: '2026-01-01T00:00:00Z',
+              createdBy: 'local-user',
+            },
+          ]),
+      });
+
+      const { result } = renderHook(() => useSchemaLibrary(), {
+        wrapper: makeWrapper(adapter),
+      });
+      await waitFor(() => expect(result.current.status).toBe('success'));
+
+      act(() => {
+        result.current.toggleLifecycleFilter('versioned');
+      });
+
+      expect(result.current.filters.lifecycles).toEqual(['versioned']);
+      expect(result.current.filteredItems).toHaveLength(1);
+      expect(result.current.filteredItems[0].schemaId).toBe('2');
+    });
+
     it('clearFilters resets all filters', async () => {
       const { result } = await setupHook();
 
@@ -467,6 +559,7 @@ describe('useSchemaLibrary', () => {
 
       expect(result.current.filters.search).toBe('');
       expect(result.current.filters.ownerships).toHaveLength(0);
+      expect(result.current.filters.lifecycles).toHaveLength(0);
       expect(result.current.filteredItems).toHaveLength(3);
     });
 

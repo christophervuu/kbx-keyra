@@ -142,8 +142,21 @@ describe('get-mapping handler', () => {
         name: 'Invoice Map',
         version: 2,
         engineVersion: '1.0.0',
-        sourceSchemaRef: { schemaId: 'stale-source', type: 'local' },
-        targetSchemaRef: { schemaId: 'stale-target', type: 'github', commitSha: 'abc123' },
+        sourceSchemaRef: {
+          schemaId: 'stale-source',
+          type: 'local',
+          schemaVersion: 1,
+          schemaVersionId: 'sv-source-1',
+          contentHash: 'hash-source-1',
+        },
+        targetSchemaRef: {
+          schemaId: 'stale-target',
+          type: 'github',
+          commitSha: 'abc123',
+          schemaVersion: 1,
+          schemaVersionId: 'sv-target-1',
+          contentHash: 'hash-target-1',
+        },
         config: {},
         rules: [],
       }),
@@ -154,11 +167,24 @@ describe('get-mapping handler', () => {
 
     expect(result.statusCode).toBe(200);
     const parsed = JSON.parse(result.body) as {
-      sourceSchemaRef?: { schemaId: string; type: string };
-      targetSchemaRef?: { schemaId: string; type: string; commitSha?: string };
+      sourceSchemaRef?: { schemaId: string; type: string; schemaVersion?: number; schemaVersionId?: string; contentHash?: string };
+      targetSchemaRef?: { schemaId: string; type: string; commitSha?: string; schemaVersion?: number; schemaVersionId?: string; contentHash?: string };
     };
-    expect(parsed.sourceSchemaRef).toEqual({ schemaId: 'schema-source-meta', type: 'local' });
-    expect(parsed.targetSchemaRef).toEqual({ schemaId: 'schema-target-meta', type: 'github', commitSha: 'abc123' });
+    expect(parsed.sourceSchemaRef).toEqual({
+      schemaId: 'schema-source-meta',
+      type: 'local',
+      schemaVersion: 1,
+      schemaVersionId: 'sv-source-1',
+      contentHash: 'hash-source-1',
+    });
+    expect(parsed.targetSchemaRef).toEqual({
+      schemaId: 'schema-target-meta',
+      type: 'github',
+      commitSha: 'abc123',
+      schemaVersion: 1,
+      schemaVersionId: 'sv-target-1',
+      contentHash: 'hash-target-1',
+    });
   });
 
   it('missing mapping returns 404', async () => {

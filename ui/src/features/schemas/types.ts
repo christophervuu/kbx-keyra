@@ -90,6 +90,7 @@ export type DisplayFormat = 'JSON' | 'XSD' | 'Inferred';
 export type FilterDataFormat = Uppercase<SchemaDataFormat>;
 export type FilterOwnership = SchemaOwnership;
 export type FilterStatus = Extract<SchemaStatus, 'ready' | 'processing' | 'needs_review' | 'error'>;
+export type FilterLifecycle = 'draft' | 'versioned' | 'archived';
 export type SchemaLibraryViewMode = 'card' | 'list';
 
 export interface SchemaLibraryItem {
@@ -107,6 +108,10 @@ export interface SchemaLibraryItem {
   syncStatus: SyncStatus;
   projectCount: number;
   projectNames: string[];
+  lifecycle: FilterLifecycle;
+  latestVersion: number;
+  draftRevision: number | null;
+  archived: boolean;
   updatedAt: string;
   createdAt: string;
 }
@@ -116,6 +121,7 @@ export interface SchemaLibraryFilters {
   ownerships: FilterOwnership[];
   dataFormats: FilterDataFormat[];
   statuses: FilterStatus[];
+  lifecycles: FilterLifecycle[];
 }
 
 export type SortField =

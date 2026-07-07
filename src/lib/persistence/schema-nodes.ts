@@ -1,13 +1,32 @@
-import { BatchWriteCommand, QueryCommand, type BatchWriteCommandInput } from '@aws-sdk/lib-dynamodb';
+import {
+  BatchWriteCommand,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  type BatchWriteCommandInput,
+} from '@aws-sdk/lib-dynamodb';
 
 import { dynamoClient } from './clients.js';
 import { TABLE_NAMES } from './config.js';
-import type { SchemaNodeItem } from './types.js';
+import type { SchemaNodeIdentity, SchemaNodeItem } from './types.js';
 
 const DYNAMO_BATCH_SIZE = 25;
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 100;
 const DEFAULT_QUERY_LIMIT = 50;
+const IDENTITY_SCHEMA_PREFIX = 'IDENTITY#';
+
+function identitySchemaId(schemaVersionId: string): string {
+  return `${IDENTITY_SCHEMA_PREFIX}${schemaVersionId}`;
+}
+
+function jsonPointerDepth(pointer: string): number {
+  if (pointer === '') {
+    return 0;
+  }
+
+  return pointer.split('/').length - 1;
+}
 
 function hashString(input: string): number {
   let hash = 2166136261;
@@ -321,9 +340,141 @@ export async function deleteBySchema(schemaId: string): Promise<void> {
   }
 }
 
+function toIdentitySidecarItem(identity: SchemaNodeIdentity): Record<string, unknown> {
+  return {
+    schemaId: identitySchemaId(identity.schemaVersionId),
+    path: identity.jsonPointer,
+    fieldName: '__identity__',
+    type: 'identity',
+    description: identity.fieldId,
+    depth: jsonPointerDepth(identity.jsonPointer),
+    isArray: false,
+    isRequired: false,
+    parentPath: identity.parentFieldId ?? null,
+    childCount: 0,
+    subtreeFieldCount: 1,
+    embeddingText: `identity ${identity.fieldId} ${identity.jsonPointer}`,
+    schemaVersionId: identity.schemaVersionId,
+    fieldId: identity.fieldId,
+    jsonPointer: identity.jsonPointer,
+    ...(identity.parentFieldId ? { parentFieldId: identity.parentFieldId } : {}),
+  };
+}
+
+function toSchemaNodeIdentity(item: Record<string, unknown>): SchemaNodeIdentity | null {
+  const schemaVersionId = item.schemaVersionId;
+  const fieldId = item.fieldId;
+  const jsonPointer = item.jsonPointer;
+  const parentFieldId = item.parentFieldId;
+
+  if (typeof schemaVersionId !== 'string' || typeof fieldId !== 'string' || typeof jsonPointer !== 'string') {
+    return null;
+  }
+
+  return {
+    schemaVersionId,
+    fieldId,
+    jsonPointer,
+    ...(typeof parentFieldId === 'string' ? { parentFieldId } : {}),
+  };
+}
+
+export async function putSchemaNodeIdentity(identity: SchemaNodeIdentity): Promise<void> {
+  await dynamoClient.send(
+    new PutCommand({
+      TableName: TABLE_NAMES.schemaNodes,
+      Item: toIdentitySidecarItem(identity),
+    }),
+  );
+}
+
+export async function batchWriteSchemaNodeIdentities(
+  schemaVersionId: string,
+  identities: readonly SchemaNodeIdentity[],
+): Promise<void> {
+  if (identities.length === 0) {
+    return;
+  }
+
+  const normalized = identities.map((identity) => ({
+    ...identity,
+    schemaVersionId,
+  }));
+
+  const identityChunks = chunk(normalized, DYNAMO_BATCH_SIZE);
+  for (const identityChunk of identityChunks) {
+    const requests: BatchWriteRequest[] = identityChunk.map((identity) => ({
+      PutRequest: {
+        Item: toIdentitySidecarItem(identity),
+      },
+    }));
+
+    await batchWriteWithRetry(requests);
+  }
+}
+
+export async function getSchemaNodeIdentity(
+  schemaVersionId: string,
+  jsonPointer: string,
+): Promise<SchemaNodeIdentity | null> {
+  const result = await dynamoClient.send(
+    new GetCommand({
+      TableName: TABLE_NAMES.schemaNodes,
+      Key: {
+        schemaId: identitySchemaId(schemaVersionId),
+        path: jsonPointer,
+      },
+    }),
+  );
+
+  if (!result.Item || typeof result.Item !== 'object') {
+    return null;
+  }
+
+  return toSchemaNodeIdentity(result.Item as Record<string, unknown>);
+}
+
+export async function listSchemaNodeIdentities(schemaVersionId: string): Promise<SchemaNodeIdentity[]> {
+  const identities: SchemaNodeIdentity[] = [];
+  let lastEvaluatedKey: Record<string, unknown> | undefined;
+
+  do {
+    const result = await dynamoClient.send(
+      new QueryCommand({
+        TableName: TABLE_NAMES.schemaNodes,
+        KeyConditionExpression: 'schemaId = :schemaId',
+        ExpressionAttributeValues: {
+          ':schemaId': identitySchemaId(schemaVersionId),
+        },
+        ScanIndexForward: true,
+        ExclusiveStartKey: lastEvaluatedKey,
+      }),
+    );
+
+    for (const raw of result.Items ?? []) {
+      if (!raw || typeof raw !== 'object') {
+        continue;
+      }
+
+      const identity = toSchemaNodeIdentity(raw as Record<string, unknown>);
+      if (identity) {
+        identities.push(identity);
+      }
+    }
+
+    lastEvaluatedKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (lastEvaluatedKey);
+
+  return identities;
+}
+
 export const schemaNodes = {
+  batchWriteSchemaNodeIdentities,
   batchWrite,
+  getSchemaNodeIdentity,
+  listSchemaNodeIdentities,
   listBySchema,
+  putSchemaNodeIdentity,
   queryContains,
   backfillRetrievalFields,
   deleteBySchema,

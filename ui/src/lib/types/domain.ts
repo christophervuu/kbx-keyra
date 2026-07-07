@@ -481,6 +481,135 @@ export interface SchemaRef {
   readonly schemaId: string;
   readonly type: SchemaRefType;
   readonly commitSha?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
+}
+
+export type SchemaVersionStatus = 'creating' | 'ready' | 'failed' | 'deprecated';
+
+export type SchemaDerivedStatus = 'pending' | 'ready' | 'failed';
+
+export interface SchemaDraftRevision {
+  readonly schemaId: string;
+  readonly revision: number;
+  readonly basedOnVersion: number | null;
+  readonly contentHash: string;
+  readonly savedAt: ISODateString;
+  readonly savedBy: string;
+}
+
+export interface SchemaVersionEntry {
+  readonly schemaId: string;
+  readonly version: number;
+  readonly schemaVersionId: string;
+  readonly draftRevision: number;
+  readonly basedOnVersion: number | null;
+  readonly contentHash: string;
+  readonly versionStatus: SchemaVersionStatus;
+  readonly indexStatus: SchemaDerivedStatus;
+  readonly impactStatus: SchemaDerivedStatus;
+  readonly sampleValidationStatus: SchemaDerivedStatus;
+  readonly createdAt: ISODateString;
+  readonly createdBy: string;
+}
+
+export interface SaveSchemaDraftInput {
+  readonly content: Readonly<Record<string, unknown>> | string;
+  readonly expectedRevision?: number;
+}
+
+export interface SaveSchemaDraftResult {
+  readonly noChange: boolean;
+  readonly revision: number;
+  readonly draft: SchemaDraftRevision;
+}
+
+export interface CreateSchemaVersionInput {
+  readonly expectedDraftRevision: number;
+  readonly idempotencyKey?: string;
+  readonly changeSummary?: string;
+}
+
+export interface CreateSchemaVersionResult {
+  readonly noChange: boolean;
+  readonly replayed?: boolean;
+  readonly version?: SchemaVersionEntry;
+}
+
+export interface UpdateSchemaSampleInput {
+  readonly sampleName?: string;
+  readonly sampleContent: unknown;
+}
+
+export interface SetDefaultSchemaSampleInput {
+  readonly sampleId: string | null;
+}
+
+export type MappingSchemaUpgradeRole = 'source' | 'target' | 'enrichment';
+
+export interface MappingSchemaUpgradeImmutableRef {
+  readonly schemaId: string;
+  readonly schemaVersion: number;
+  readonly schemaVersionId: string;
+  readonly contentHash: string;
+}
+
+export interface MappingSchemaUpgradePreviewInput {
+  readonly expectedMappingRevision: number;
+  readonly role: MappingSchemaUpgradeRole;
+  readonly enrichmentAlias?: string;
+  readonly destination: MappingSchemaUpgradeImmutableRef;
+}
+
+export interface MappingSchemaUpgradePreviewResult {
+  readonly previewId: string;
+  readonly mappingId: string;
+  readonly baseMappingRevision: number;
+  readonly role: MappingSchemaUpgradeRole;
+  readonly enrichmentAlias?: string;
+  readonly from: MappingSchemaUpgradeImmutableRef;
+  readonly to: MappingSchemaUpgradeImmutableRef;
+  readonly impact: {
+    readonly role: MappingSchemaUpgradeRole;
+    readonly breakingCount: number;
+    readonly nonBreakingCount: number;
+    readonly affectedRules: ReadonlyArray<{
+      readonly ruleIndex: number;
+      readonly target: string;
+      readonly expression: string;
+      readonly severity: 'breaking' | 'non-breaking';
+      readonly matchedPaths: readonly string[];
+    }>;
+  };
+  readonly diff: {
+    readonly added: readonly string[];
+    readonly removed: readonly string[];
+    readonly renamed: ReadonlyArray<{ fromPath: string; toPath: string }>;
+    readonly moved: ReadonlyArray<{ fromPath: string; toPath: string }>;
+  };
+  readonly suggestions: ReadonlyArray<{
+    readonly suggestionId: string;
+    readonly type: 'rename' | 'move';
+    readonly fromPath: string;
+    readonly toPath: string;
+  }>;
+  readonly warnings?: readonly string[];
+}
+
+export interface MappingSchemaUpgradeApplyInput {
+  readonly expectedMappingRevision: number;
+  readonly previewId: string;
+  readonly acceptedSuggestions: readonly string[];
+  readonly confirm: boolean;
+}
+
+export interface MappingSchemaUpgradeApplyResult {
+  readonly mappingId: string;
+  readonly revision: number;
+  readonly upgradedRole: MappingSchemaUpgradeRole;
+  readonly upgradedTo: MappingSchemaUpgradeImmutableRef;
+  readonly noChange: boolean;
 }
 
 export interface MappingRule {
@@ -504,6 +633,9 @@ export interface MappingEnrichmentSource {
    * Legacy compatibility aliases derived from config.externalSources may omit it.
    */
   readonly schemaId?: string;
+  readonly schemaVersion?: number;
+  readonly schemaVersionId?: string;
+  readonly contentHash?: string;
   readonly required?: boolean;
   readonly description?: string;
 }
@@ -645,6 +777,7 @@ export interface SchemaMetadata {
   readonly reviewedBy?: string;
   readonly samplePayloadCount?: number;
   readonly samplePayloads?: readonly SchemaSamplePayloadMetadata[];
+  readonly defaultSampleId?: string;
   readonly disambiguator?: string;
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
