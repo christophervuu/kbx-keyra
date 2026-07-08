@@ -4,6 +4,15 @@ import type { ApiAdapter, MappingImportSummary } from './types';
 import type {
   CurrentDeployment,
   CurrentDeployments,
+  DeploymentOperationAcceptedResponse,
+  DeploymentOperationStatusResponse,
+  DeploymentOverviewAttentionState,
+  DeploymentOverviewEnvironmentState,
+  DeploymentOverviewItem,
+  DeploymentOverviewListOptions,
+  DeploymentOverviewListResponse,
+  DeploymentOverviewOperationStatus,
+  DeploymentOverviewPromotionState,
   DeploymentRecord,
   DeploymentSourceType,
 } from './types';
@@ -840,6 +849,246 @@ export class LocalStorageAdapter implements ApiAdapter {
     this.writeDeployments(mappingId, deployments);
 
     return record;
+  }
+
+  private normalizeOverviewOperationStatus(
+    status: DeploymentOverviewOperationStatus | null,
+  ): DeploymentOverviewOperationStatus {
+    return status ?? 'SUCCEEDED';
+  }
+
+  private isOverviewFailureStatus(status: DeploymentOverviewOperationStatus | null): boolean {
+    return status === 'FAILED' || status === 'TIMED_OUT';
+  }
+
+  private toOverviewEnvironmentState(
+    current: CurrentDeployment | null,
+    freshness: DeploymentOverviewEnvironmentState['freshness'],
+  ): DeploymentOverviewEnvironmentState {
+    const lastOperationStatus = this.normalizeOverviewOperationStatus(null);
+
+    return {
+      activeArtifactId: current?.artifactId ?? null,
+      activeVersion: current?.sourceNumber ?? null,
+      freshness,
+      lastOperationStatus,
+    };
+  }
+
+  private compareOverviewItems(a: DeploymentOverviewItem, b: DeploymentOverviewItem): number {
+    const byActivity = b.lastActivityAt.localeCompare(a.lastActivityAt);
+    if (byActivity !== 0) {
+      return byActivity;
+    }
+
+    const byProject = a.projectName.localeCompare(b.projectName);
+    if (byProject !== 0) {
+      return byProject;
+    }
+
+    const byMapping = a.mappingName.localeCompare(b.mappingName);
+    if (byMapping !== 0) {
+      return byMapping;
+    }
+
+    return a.mappingId.localeCompare(b.mappingId);
+  }
+
+  private filterOverviewItems(
+    items: readonly DeploymentOverviewItem[],
+    options?: DeploymentOverviewListOptions,
+  ): DeploymentOverviewItem[] {
+    if (!options) {
+      return [...items];
+    }
+
+    const searchTokens = typeof options.search === 'string'
+      ? options.search
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((token) => token.length > 0)
+      : [];
+
+    return items.filter((item) => {
+      const envState = options.environment ? item.environments[options.environment] : null;
+
+      if (options.freshness) {
+        if (envState) {
+          if (envState.freshness !== options.freshness) {
+            return false;
+          }
+        } else if (
+          item.environments.DEV.freshness !== options.freshness
+          && item.environments.PREPROD.freshness !== options.freshness
+          && item.environments.PROD.freshness !== options.freshness
+        ) {
+          return false;
+        }
+      }
+
+      if (options.operationStatus) {
+        if (envState) {
+          if (envState.lastOperationStatus !== options.operationStatus) {
+            return false;
+          }
+        } else if (
+          item.environments.DEV.lastOperationStatus !== options.operationStatus
+          && item.environments.PREPROD.lastOperationStatus !== options.operationStatus
+          && item.environments.PROD.lastOperationStatus !== options.operationStatus
+        ) {
+          return false;
+        }
+      }
+
+      if (typeof options.version === 'number') {
+        if (envState) {
+          if (envState.activeVersion !== options.version) {
+            return false;
+          }
+        } else if (
+          item.environments.DEV.activeVersion !== options.version
+          && item.environments.PREPROD.activeVersion !== options.version
+          && item.environments.PROD.activeVersion !== options.version
+        ) {
+          return false;
+        }
+      }
+
+      if (options.attentionState && item.attentionState !== options.attentionState) {
+        return false;
+      }
+
+      if (searchTokens.length > 0) {
+        const haystack = `${item.projectName} ${item.mappingName} ${item.mappingId}`.toLowerCase();
+        if (!searchTokens.every((token) => haystack.includes(token))) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  private buildOverviewItems(projectId?: string): DeploymentOverviewItem[] {
+    const projects = this.readArray<StoredProject>(STORAGE_KEYS.projects);
+    const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings)
+      .filter((mapping) => (projectId ? mapping.projectId === projectId : true));
+
+    return mappings.map((mapping) => {
+      const project = projects.find((entry) => entry.projectId === mapping.projectId);
+      const deployments = this.readDeployments(mapping.mappingId)
+        .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt));
+
+      const latestVersion = mapping.latestVersion ?? mapping.version;
+
+      const devCurrent = deployments.find((entry) => entry.environment === 'DEV') ?? null;
+      const preprodCurrent = deployments.find((entry) => entry.environment === 'PREPROD') ?? null;
+      const prodCurrent = deployments.find((entry) => entry.environment === 'PROD') ?? null;
+
+      const currentSummary = this.computeAllEnvironments(
+        {
+          DEV: devCurrent ? this.toCurrentDeployment(devCurrent) : null,
+          PREPROD: preprodCurrent ? this.toCurrentDeployment(preprodCurrent) : null,
+          PROD: prodCurrent ? this.toCurrentDeployment(prodCurrent) : null,
+        },
+        {
+          revision: mapping.version,
+          latestVersion,
+        },
+      );
+
+      const devLastOperation = this.normalizeOverviewOperationStatus(null);
+      const preprodLastOperation = this.normalizeOverviewOperationStatus(null);
+      const prodLastOperation = this.normalizeOverviewOperationStatus(null);
+
+      const needsAttention = this.isOverviewFailureStatus(devLastOperation)
+        || this.isOverviewFailureStatus(preprodLastOperation)
+        || this.isOverviewFailureStatus(prodLastOperation);
+
+      const promotionState: DeploymentOverviewPromotionState = devCurrent
+        ? 'AVAILABLE'
+        : 'NOT_APPLICABLE';
+      const attentionState: DeploymentOverviewAttentionState = needsAttention
+        ? 'NEEDS_ATTENTION'
+        : 'OK';
+
+      const activityCandidates = [
+        mapping.updatedAt,
+        deployments[0]?.deployedAt,
+      ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+      const lastActivityAt = activityCandidates.length > 0
+        ? activityCandidates.sort((a, b) => b.localeCompare(a))[0] ?? this.nowIso()
+        : this.nowIso();
+
+      return {
+        mappingId: mapping.mappingId,
+        projectId: mapping.projectId,
+        projectName: project?.name ?? mapping.projectId,
+        mappingName: mapping.name,
+        latestVersion,
+        latestVersionCreatedAt: mapping.updatedAt,
+        promotionState,
+        attentionState,
+        activeOperationId: null,
+        lastActivityAt,
+        lastActorId: 'local-user',
+        updatedAt: mapping.updatedAt,
+        environments: {
+          DEV: {
+            ...this.toOverviewEnvironmentState(devCurrent ? this.toCurrentDeployment(devCurrent) : null, currentSummary.DEV.status === 'not-deployed' ? 'NOT_DEPLOYED' : currentSummary.DEV.status === 'stale' ? 'STALE' : 'CURRENT'),
+            lastOperationStatus: devLastOperation,
+          },
+          PREPROD: {
+            ...this.toOverviewEnvironmentState(preprodCurrent ? this.toCurrentDeployment(preprodCurrent) : null, currentSummary.PREPROD.status === 'not-deployed' ? 'NOT_DEPLOYED' : currentSummary.PREPROD.status === 'stale' ? 'STALE' : 'CURRENT'),
+            lastOperationStatus: preprodLastOperation,
+          },
+          PROD: {
+            ...this.toOverviewEnvironmentState(prodCurrent ? this.toCurrentDeployment(prodCurrent) : null, currentSummary.PROD.status === 'not-deployed' ? 'NOT_DEPLOYED' : currentSummary.PROD.status === 'stale' ? 'STALE' : 'CURRENT'),
+            lastOperationStatus: prodLastOperation,
+          },
+        },
+      };
+    });
+  }
+
+  private buildDeploymentOverviewResponse(
+    items: readonly DeploymentOverviewItem[],
+    options?: DeploymentOverviewListOptions,
+    projectId?: string,
+  ): DeploymentOverviewListResponse {
+    const sorted = [...items].sort((a, b) => this.compareOverviewItems(a, b));
+    const filtered = this.filterOverviewItems(sorted, options);
+
+    const pageSize = Math.min(Math.max(options?.pageSize ?? 100, 1), 250);
+    const offset = options?.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+    const start = Number.isFinite(offset) && offset > 0 ? offset : 0;
+    const pageItems = filtered.slice(start, start + pageSize);
+    const nextCursor = start + pageSize < filtered.length ? String(start + pageSize) : null;
+
+    const failedCount = filtered.filter((item) =>
+      this.isOverviewFailureStatus(item.environments.DEV.lastOperationStatus)
+      || this.isOverviewFailureStatus(item.environments.PREPROD.lastOperationStatus)
+      || this.isOverviewFailureStatus(item.environments.PROD.lastOperationStatus),
+    ).length;
+
+    const attentionCount = filtered.filter((item) => item.attentionState === 'NEEDS_ATTENTION').length;
+
+    return {
+      ...(projectId ? { projectId } : {}),
+      items: pageItems,
+      page: {
+        pageSize,
+        nextCursor,
+        returned: pageItems.length,
+        totalMatched: filtered.length,
+      },
+      summary: {
+        failedCount,
+        attentionCount,
+      },
+    };
   }
 
   private async getLatestVersionNumber(mappingId: string): Promise<number | null> {
@@ -2429,6 +2678,86 @@ export class LocalStorageAdapter implements ApiAdapter {
       revision: mapping.version,
       latestVersion,
     });
+  }
+
+  async startDeployOperation(
+    mappingId: string,
+    input: {
+      version: number;
+      targetEnvironment: RuntimeEnvironment;
+      expectedActiveArtifactId: string | null;
+      reason?: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    void mappingId;
+    void input;
+    void idempotencyKey;
+    throw this.offlineModeError();
+  }
+
+  async startPromotionOperation(
+    mappingId: string,
+    input: {
+      sourceEnvironment: RuntimeEnvironment;
+      targetEnvironment: RuntimeEnvironment;
+      expectedSourceArtifactId: string;
+      expectedTargetArtifactId: string | null;
+      reason?: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    void mappingId;
+    void input;
+    void idempotencyKey;
+    throw this.offlineModeError();
+  }
+
+  async startRollbackOperation(
+    mappingId: string,
+    input: {
+      environment: RuntimeEnvironment;
+      targetArtifactId: string;
+      expectedActiveArtifactId: string;
+      reason: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    void mappingId;
+    void input;
+    void idempotencyKey;
+    throw this.offlineModeError();
+  }
+
+  async retryDeploymentOperation(
+    operationId: string,
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    void operationId;
+    void idempotencyKey;
+    throw this.offlineModeError();
+  }
+
+  async getDeploymentOperation(
+    operationId: string,
+  ): Promise<DeploymentOperationStatusResponse> {
+    void operationId;
+    throw this.offlineModeError();
+  }
+
+  override async listGlobalDeploymentSummaries(
+    options?: DeploymentOverviewListOptions,
+  ): Promise<DeploymentOverviewListResponse> {
+    const items = this.buildOverviewItems();
+    return this.buildDeploymentOverviewResponse(items, options);
+  }
+
+  override async listProjectDeploymentSummaries(
+    projectId: string,
+    options?: DeploymentOverviewListOptions,
+  ): Promise<DeploymentOverviewListResponse> {
+    const items = this.buildOverviewItems(projectId);
+    return this.buildDeploymentOverviewResponse(items, options, projectId);
   }
 
   // GitHub: CDM Repo (read-only)

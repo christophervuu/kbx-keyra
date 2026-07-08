@@ -39,6 +39,8 @@ Environment/account mapping:
 
 Run these steps once for each env (`dev`, `preprod`, `prod`).
 
+> FS-106 T-13 scope note: runtime bootstrap is greenfield for `dev|preprod|prod` only. `sandbox` is not a valid runtime bootstrap environment value.
+
 ### 2.1 Validate/build template
 
 ```bash
@@ -159,6 +161,24 @@ Pass criteria:
 - Command exits `0` (including empty changeset)
 - Required outputs remain resolvable/non-empty
 - Existing runtime data remains queryable (no table/bucket replacement side effects)
+
+### 2.7 Greenfield no-user-seed audit (fresh account/stack)
+
+Immediately after first successful stack create in an empty runtime account, verify runtime deployment stores are empty.
+
+```bash
+ACTIVE_TABLE=$(aws cloudformation describe-stacks --region "$AWS_REGION" --profile "$AWS_PROFILE" --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ActiveSnapshotsTableName'].OutputValue" --output text)
+HISTORY_TABLE=$(aws cloudformation describe-stacks --region "$AWS_REGION" --profile "$AWS_PROFILE" --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='DeploymentHistoryTableName'].OutputValue" --output text)
+
+aws dynamodb scan --region "$AWS_REGION" --profile "$AWS_PROFILE" --table-name "$ACTIVE_TABLE" --select COUNT --query 'Count'
+aws dynamodb scan --region "$AWS_REGION" --profile "$AWS_PROFILE" --table-name "$HISTORY_TABLE" --select COUNT --query 'Count'
+```
+
+Pass criteria:
+
+- `ActiveSnapshots` count is `0`
+- `DeploymentHistory` count is `0`
+- No bootstrap step writes user-owned project/mapping/sample/value-map/history data
 
 ---
 

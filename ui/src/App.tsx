@@ -8,6 +8,7 @@ import {
 import { AppLayout } from '@/components/layout';
 import CreateMapping from '@/routes/pages/CreateMapping';
 import CreateProject from '@/routes/pages/CreateProject';
+import Deployments from '@/routes/pages/Deployments';
 import HomeDashboard from '@/routes/pages/HomeDashboard';
 import MappingDeployment from '@/routes/pages/MappingDeployment';
 import MappingEditor from '@/routes/pages/MappingEditor';
@@ -28,6 +29,7 @@ const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<AppLayout />}>
       <Route path="/" element={<HomeDashboard />} />
+      <Route path="/deployments" element={<Deployments />} />
       <Route path="/value-mappings" element={<ValueMappingsLibrary />} />
       <Route path="/value-mappings/:valueMapId" element={<ValueMappingDetail />} />
       <Route path="/projects/new" element={<CreateProject />} />

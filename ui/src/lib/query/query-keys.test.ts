@@ -40,4 +40,24 @@ describe('query-keys', () => {
     expect(projectList).toEqual(['projects', 'list', { query: 'abc' }]);
     expect(projectList).not.toContain('DEV');
   });
+
+  it('defines deployment overview keys for global and project scopes', () => {
+    expect(queryKeys.deployments.globalOverviews()).toEqual(['deployments', 'overview', 'global']);
+    expect(queryKeys.deployments.projectOverviews()).toEqual(['deployments', 'overview', 'project']);
+
+    expect(queryKeys.deployments.globalOverview({ attentionState: 'NEEDS_ATTENTION', pageSize: 25 })).toEqual([
+      'deployments',
+      'overview',
+      'global',
+      { attentionState: 'NEEDS_ATTENTION', pageSize: 25 },
+    ]);
+
+    expect(queryKeys.deployments.projectOverview('project-1', { environment: 'DEV', freshness: 'STALE' })).toEqual([
+      'deployments',
+      'overview',
+      'project',
+      'project-1',
+      { environment: 'DEV', freshness: 'STALE' },
+    ]);
+  });
 });

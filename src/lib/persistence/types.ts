@@ -799,6 +799,8 @@ export interface DeploymentItem {
   readonly configHash: string;
   readonly deployedAt: ISODateString;
   readonly deployedBy: string;
+  readonly rollbackEligible?: boolean;
+  readonly rollbackEligibilityUpdatedAt?: ISODateString;
   readonly cdmSchemaTraceability?: readonly DeploymentCdmSchemaTraceabilityEntry[];
   readonly promotedFrom?: DeploymentEnvironment;
   readonly rollbackOf?: string;
@@ -918,6 +920,84 @@ export interface UpdateDeploymentOrchestrationStatusInput {
   readonly lastErrorCode?: string;
   readonly lastErrorMessage?: string;
   readonly completedAt?: ISODateString;
+}
+
+export type DeploymentOperationType = 'DEPLOY' | 'PROMOTE' | 'ROLLBACK' | 'RETRY';
+
+export type DeploymentOperationStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT';
+
+export type DeploymentFreshness = 'NOT_DEPLOYED' | 'CURRENT' | 'STALE';
+
+export type DeploymentPromotionState = 'NOT_APPLICABLE' | 'ALIGNED' | 'AVAILABLE' | 'BLOCKED';
+
+export type DeploymentAttentionState = 'OK' | 'NEEDS_ATTENTION';
+
+export interface DeploymentSummaryEnvironmentState {
+  readonly activeArtifactId: string | null;
+  readonly activeVersion: number | null;
+  readonly freshness: DeploymentFreshness;
+  readonly lastOperationStatus: DeploymentOperationStatus | null;
+}
+
+export interface DeploymentSummaryItem {
+  readonly mappingId: string;
+  readonly globalPartition: 'GLOBAL';
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly mappingName: string;
+  readonly latestVersion: number | null;
+  readonly latestVersionCreatedAt: ISODateString | null;
+
+  readonly devActiveArtifactId: string | null;
+  readonly devActiveVersion: number | null;
+  readonly devFreshness: DeploymentFreshness;
+  readonly devLastOperationStatus: DeploymentOperationStatus | null;
+
+  readonly preprodActiveArtifactId: string | null;
+  readonly preprodActiveVersion: number | null;
+  readonly preprodFreshness: DeploymentFreshness;
+  readonly preprodLastOperationStatus: DeploymentOperationStatus | null;
+
+  readonly prodActiveArtifactId: string | null;
+  readonly prodActiveVersion: number | null;
+  readonly prodFreshness: DeploymentFreshness;
+  readonly prodLastOperationStatus: DeploymentOperationStatus | null;
+
+  readonly promotionState: DeploymentPromotionState;
+  readonly attentionState: DeploymentAttentionState;
+  readonly activeOperationId: string | null;
+  readonly lastActivityAt: ISODateString;
+  readonly lastActorId: string;
+  readonly lastActorDisplayName?: string;
+  readonly updatedAt: ISODateString;
+}
+
+export interface InitializeDeploymentSummaryInput {
+  readonly mappingId: string;
+  readonly projectId: string;
+  readonly projectName?: string;
+  readonly mappingName: string;
+  readonly latestVersion?: number | null;
+  readonly latestVersionCreatedAt?: ISODateString | null;
+  readonly actorId?: string;
+  readonly actorDisplayName?: string;
+  readonly occurredAt?: ISODateString;
+}
+
+export interface UpsertDeploymentSummaryInput {
+  readonly mappingId: string;
+  readonly projectId?: string;
+  readonly projectName?: string;
+  readonly mappingName?: string;
+  readonly latestVersion?: number | null;
+  readonly latestVersionCreatedAt?: ISODateString | null;
+  readonly environmentStates?: Partial<Record<DeploymentEnvironment, Partial<DeploymentSummaryEnvironmentState>>>;
+  readonly operationType?: DeploymentOperationType;
+  readonly operationStatus?: DeploymentOperationStatus | null;
+  readonly activeOperationId?: string | null;
+  readonly actorId?: string;
+  readonly actorDisplayName?: string;
+  readonly occurredAt?: ISODateString;
 }
 
 /**

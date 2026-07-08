@@ -116,6 +116,13 @@ function buildBreadcrumbs(
 ): BreadcrumbSegment[] {
   const segments = pathname.split('/').filter(Boolean);
 
+  if (segments[0] === 'deployments') {
+    return [
+      { label: 'Home', path: '/' },
+      { label: 'Deployments' },
+    ];
+  }
+
   if (segments[0] === 'projects') {
     return buildProjectHierarchyBreadcrumbs(segments, params, labels);
   }

@@ -21,6 +21,29 @@ describe('query-invalidation keys', () => {
   it('supports deployment summary/context/history targeting', () => {
     expect(queryInvalidationKeys.deployments.family()).toEqual(['deployments']);
     expect(queryInvalidationKeys.deployments.summaryList()).toEqual(['deployments', 'summary']);
+    expect(queryInvalidationKeys.deployments.globalOverviewList()).toEqual([
+      'deployments',
+      'overview',
+      'global',
+    ]);
+    expect(queryInvalidationKeys.deployments.projectOverviewList()).toEqual([
+      'deployments',
+      'overview',
+      'project',
+    ]);
+    expect(queryInvalidationKeys.deployments.globalOverview({ attentionState: 'NEEDS_ATTENTION' })).toEqual([
+      'deployments',
+      'overview',
+      'global',
+      { attentionState: 'NEEDS_ATTENTION' },
+    ]);
+    expect(queryInvalidationKeys.deployments.projectOverview('project-1', { environment: 'DEV' })).toEqual([
+      'deployments',
+      'overview',
+      'project',
+      'project-1',
+      { environment: 'DEV' },
+    ]);
     expect(queryInvalidationKeys.deployments.context('mapping-1')).toEqual([
       'deployments',
       'context',

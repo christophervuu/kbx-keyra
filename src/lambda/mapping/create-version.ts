@@ -2,6 +2,7 @@ import {
   computeConfigHash,
   type MappingConfig as PersistenceMappingConfig,
 } from '../../lib/persistence/index.js';
+import { upsert as upsertDeploymentSummary } from '../../lib/persistence/deployment-summaries.js';
 import {
   ERROR_CODES,
   errorResponse,
@@ -291,6 +292,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       TableName: getMappingVersionsTableOrThrow(),
       Item: item,
     });
+
+    const mapping = await getItem<MappingMetadata>({
+      TableName: getMappingsTableOrThrow(),
+      Key: { mappingId },
+    });
+
+    if (mapping) {
+      await upsertDeploymentSummary({
+        mappingId,
+        projectId: mapping.projectId,
+        mappingName: mapping.name,
+        latestVersion: nextVersion,
+        latestVersionCreatedAt: createdAt,
+        actorId: 'development:system',
+        actorDisplayName: 'Development',
+        occurredAt: createdAt,
+      });
+    }
 
     return jsonResponse(201, item);
   } catch (error) {

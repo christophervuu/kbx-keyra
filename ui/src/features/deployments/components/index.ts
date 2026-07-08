@@ -2,6 +2,12 @@ export { DeploymentHistorySection } from './DeploymentHistorySection';
 export type { DeploymentHistorySectionProps } from './DeploymentHistorySection';
 export { DeploymentPage } from './DeploymentPage';
 export type { DeploymentPageProps } from './DeploymentPage';
+export { DeploymentOverviewPage } from './DeploymentOverviewPage';
+export type { DeploymentOverviewPageProps } from './DeploymentOverviewPage';
+export { DeploymentOverviewFilters } from './DeploymentOverviewFilters';
+export type { DeploymentOverviewFiltersProps } from './DeploymentOverviewFilters';
+export { DeploymentOverviewTable } from './DeploymentOverviewTable';
+export type { DeploymentOverviewTableProps } from './DeploymentOverviewTable';
 export { EnvironmentComparisonPanel } from './EnvironmentComparisonPanel';
 export type { EnvironmentComparisonPanelProps } from './EnvironmentComparisonPanel';
 export { EnvironmentSelector } from './EnvironmentSelector';
@@ -10,4 +16,3 @@ export { RevisionDeploySection } from './RevisionDeploySection';
 export type { RevisionDeploySectionProps } from './RevisionDeploySection';
 export { VersionDeploySection } from './VersionDeploySection';
 export type { VersionDeploySectionProps } from './VersionDeploySection';
-

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   loadDeploymentPageQueryData,
@@ -9,6 +9,8 @@ import {
 import { useAdapter } from '@/lib/api';
 import type {
   CurrentDeployments,
+  DeploymentOperationAcceptedResponse,
+  DeploymentOperationStatusResponse,
   DeploymentOrchestrationStatus,
   DeploymentRecord,
   DeploymentSourceType,
@@ -21,6 +23,20 @@ import {
 } from '@/lib/query';
 import { toAppError } from '@/lib/state/app-error';
 import type { Environment, MappingVersion } from '@/lib/types';
+
+const ACTIVE_DEPLOYMENT_OPERATION_STORAGE_KEY = 'keyra:active-deployment-operation';
+const OPERATION_POLL_INTERVAL_MS = 2_500;
+
+type RuntimeEnvironment = 'DEV' | 'PREPROD' | 'PROD';
+
+type DeploymentActionKind = 'deploy' | 'promote' | 'rollback';
+
+interface ActiveDeploymentOperationState {
+  readonly mappingId: string;
+  readonly operationId: string;
+  readonly actionKind: DeploymentActionKind;
+  readonly targetEnvironment: RuntimeEnvironment;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,8 +98,8 @@ export interface UseDeploymentPageResult {
   clearDeployFeedback: () => void;
 
   deploy: (input: DeployInput) => Promise<void>;
-  promote: (fromEnvironment: Environment, toEnvironment: Environment) => Promise<void>;
-  rollback: (environment: Environment, deploymentSK: string) => Promise<void>;
+  promote: (fromEnvironment: Environment, toEnvironment: Environment, reason?: string) => Promise<void>;
+  rollback: (environment: Environment, deploymentSK: string, reason: string) => Promise<void>;
 
   refresh: () => void;
 }
@@ -174,6 +190,75 @@ function parseOrchestrationDetails(error: unknown): {
 
 interface CdmDeployBlockDetails {
   readonly issues?: unknown;
+}
+
+function createIdempotencyKey(prefix: string): string {
+  return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function toRuntimeEnvironment(env: Environment): RuntimeEnvironment {
+  if (env === 'QA') {
+    return 'PREPROD';
+  }
+
+  if (env === 'DEV' || env === 'PREPROD' || env === 'PROD') {
+    return env;
+  }
+
+  return 'DEV';
+}
+
+function readActiveDeploymentOperationState(mappingId: string): ActiveDeploymentOperationState | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_DEPLOYMENT_OPERATION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as ActiveDeploymentOperationState;
+    if (!parsed || parsed.mappingId !== mappingId) {
+      return null;
+    }
+
+    if (
+      typeof parsed.operationId !== 'string'
+      || (parsed.actionKind !== 'deploy' && parsed.actionKind !== 'promote' && parsed.actionKind !== 'rollback')
+      || (parsed.targetEnvironment !== 'DEV' && parsed.targetEnvironment !== 'PREPROD' && parsed.targetEnvironment !== 'PROD')
+    ) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveDeploymentOperationState(state: ActiveDeploymentOperationState | null): void {
+  try {
+    if (!state) {
+      localStorage.removeItem(ACTIVE_DEPLOYMENT_OPERATION_STORAGE_KEY);
+      return;
+    }
+
+    localStorage.setItem(ACTIVE_DEPLOYMENT_OPERATION_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function isTerminalOperationStatus(status: DeploymentOperationStatusResponse['operationStatus']): boolean {
+  return status === 'SUCCEEDED' || status === 'FAILED' || status === 'TIMED_OUT';
+}
+
+function toOrchestrationStatus(
+  status: DeploymentOperationStatusResponse['operationStatus'],
+): DeploymentOrchestrationStatus {
+  if (status === 'QUEUED') return 'queued';
+  if (status === 'RUNNING') return 'in_progress';
+  if (status === 'SUCCEEDED') return 'succeeded';
+  if (status === 'FAILED') return 'failed';
+  return 'timed_out';
 }
 
 function formatErrorMessage(error: unknown, fallback: string): string {
@@ -269,9 +354,17 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
   const adapter = useAdapter();
   const queryClient = useQueryClient();
 
-  const [environment, setEnvironmentState] = useState<DeployTarget>('SANDBOX');
+  const [environment, setEnvironmentState] = useState<DeployTarget>('DEV');
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployFeedback, setDeployFeedback] = useState<UseDeploymentPageResult['deployFeedback']>(null);
+  const [activeOperation, setActiveOperation] = useState<ActiveDeploymentOperationState | null>(() =>
+    readActiveDeploymentOperationState(mappingId),
+  );
+  const pollingTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setActiveOperation(readActiveDeploymentOperationState(mappingId));
+  }, [mappingId]);
 
   const deploymentQueryKey = queryKeys.deployments.context(mappingId);
 
@@ -341,36 +434,271 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
     }
   }, [adapter, mappingId, patchDeploymentData]);
 
+  const refreshDeploymentData = useCallback(async () => {
+    await cancelDeploymentContextReads(queryClient, mappingId);
+    await Promise.all([refreshCurrentDeployments(), refreshHistory()]);
+    invalidateDeploymentDependents(queryClient, mappingId);
+  }, [mappingId, queryClient, refreshCurrentDeployments, refreshHistory]);
+
+  const clearPollingTimer = useCallback(() => {
+    if (pollingTimerRef.current !== null) {
+      window.clearTimeout(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+  }, []);
+
+  const stopOperationPolling = useCallback(() => {
+    clearPollingTimer();
+    setActiveOperation(null);
+    writeActiveDeploymentOperationState(null);
+  }, [clearPollingTimer]);
+
+  const applyOperationSuccessFeedback = useCallback(
+    async (
+      context: ActiveDeploymentOperationState,
+      operation: DeploymentOperationStatusResponse,
+    ) => {
+      const status = toOrchestrationStatus(operation.operationStatus);
+
+      if (context.actionKind === 'deploy') {
+        setDeployFeedback({
+          kind: 'success',
+          message: `Deployment to ${context.targetEnvironment} completed successfully.`,
+          orchestration: {
+            orchestrationId: operation.operationId,
+            status,
+            finalStatus: status,
+          },
+          artifact: {
+            ...(operation.artifactId ? { artifactId: operation.artifactId } : {}),
+            ...(operation.artifactHash ? { artifactHash: operation.artifactHash } : {}),
+          },
+        });
+      } else if (context.actionKind === 'promote') {
+        setDeployFeedback({
+          kind: 'success',
+          message: `Promotion to ${context.targetEnvironment} completed successfully.`,
+          orchestration: {
+            orchestrationId: operation.operationId,
+            status,
+            finalStatus: status,
+          },
+          artifact: {
+            ...(operation.artifactId ? { artifactId: operation.artifactId } : {}),
+            ...(operation.artifactHash ? { artifactHash: operation.artifactHash } : {}),
+          },
+        });
+      } else {
+        setDeployFeedback({
+          kind: 'success',
+          message: `Rollback in ${context.targetEnvironment} completed successfully.`,
+          orchestration: {
+            orchestrationId: operation.operationId,
+            status,
+            finalStatus: status,
+          },
+          artifact: {
+            ...(operation.artifactId ? { artifactId: operation.artifactId } : {}),
+            ...(operation.artifactHash ? { artifactHash: operation.artifactHash } : {}),
+          },
+        });
+      }
+
+      await refreshDeploymentData();
+      stopOperationPolling();
+      setIsDeploying(false);
+    },
+    [refreshDeploymentData, stopOperationPolling],
+  );
+
+  const applyOperationFailureFeedback = useCallback(
+    (
+      context: ActiveDeploymentOperationState,
+      operation: DeploymentOperationStatusResponse,
+    ) => {
+      const status = toOrchestrationStatus(operation.operationStatus);
+      const failureMessage = operation.failureMessage
+        ?? `Deployment operation failed during ${operation.operationStage ?? 'FINALIZING'}.`;
+
+      setDeployFeedback({
+        kind: 'error',
+        message: failureMessage,
+        technicalDetails: {
+          message: failureMessage,
+          ...(operation.failureCode ? { code: operation.failureCode } : {}),
+          retryable: operation.retryable ?? false,
+          details: {
+            operationId: operation.operationId,
+            operationStatus: operation.operationStatus,
+            operationStage: operation.operationStage,
+            actionKind: context.actionKind,
+            targetEnvironment: context.targetEnvironment,
+          },
+        },
+        orchestration: {
+          orchestrationId: operation.operationId,
+          status,
+          finalStatus: status,
+        },
+        artifact: {
+          ...(operation.artifactId ? { artifactId: operation.artifactId } : {}),
+          ...(operation.artifactHash ? { artifactHash: operation.artifactHash } : {}),
+        },
+      });
+
+      stopOperationPolling();
+      setIsDeploying(false);
+    },
+    [stopOperationPolling],
+  );
+
   const setEnvironment = useCallback((env: Environment) => {
+    if (env === 'QA') {
+      setEnvironmentState('PREPROD');
+      return;
+    }
     setEnvironmentState(env);
   }, []);
+
+  useEffect(() => {
+    writeActiveDeploymentOperationState(activeOperation);
+  }, [activeOperation]);
+
+  useEffect(() => {
+    if (!activeOperation || activeOperation.mappingId !== mappingId) {
+      clearPollingTimer();
+      if (!activeOperation) {
+        setIsDeploying(false);
+      }
+      return;
+    }
+
+    if (!adapter.getDeploymentOperation) {
+      setDeployFeedback({
+        kind: 'error',
+        message: 'Deployment operation polling is not available in this adapter mode.',
+        technicalDetails: {
+          message: 'Missing ApiAdapter.getDeploymentOperation implementation',
+          code: 'FEATURE_NOT_ENABLED',
+          retryable: false,
+        },
+      });
+      stopOperationPolling();
+      setIsDeploying(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollOnce = async () => {
+      try {
+        const operation = await adapter.getDeploymentOperation!(activeOperation.operationId);
+        if (cancelled) {
+          return;
+        }
+
+        if (isTerminalOperationStatus(operation.operationStatus)) {
+          if (operation.operationStatus === 'SUCCEEDED') {
+            await applyOperationSuccessFeedback(activeOperation, operation);
+          } else {
+            applyOperationFailureFeedback(activeOperation, operation);
+          }
+          return;
+        }
+
+        pollingTimerRef.current = window.setTimeout(() => {
+          void pollOnce();
+        }, OPERATION_POLL_INTERVAL_MS);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        const technicalDetails = toDeploymentUiError(err, 'Failed to poll deployment operation status');
+        setDeployFeedback({
+          kind: 'error',
+          message: technicalDetails.message,
+          ...(technicalDetails.requestId ? { requestId: technicalDetails.requestId } : {}),
+          technicalDetails,
+          orchestration: {
+            orchestrationId: activeOperation.operationId,
+          },
+        });
+        stopOperationPolling();
+        setIsDeploying(false);
+      }
+    };
+
+    clearPollingTimer();
+    setIsDeploying(true);
+    void pollOnce();
+
+    return () => {
+      cancelled = true;
+      clearPollingTimer();
+    };
+  }, [
+    activeOperation,
+    adapter,
+    applyOperationFailureFeedback,
+    applyOperationSuccessFeedback,
+    clearPollingTimer,
+    mappingId,
+    stopOperationPolling,
+  ]);
 
   const deploy = useCallback(
     async (input: DeployInput): Promise<void> => {
       setIsDeploying(true);
       setDeployFeedback(null);
       try {
-        const record: DeploymentRecord = await adapter.deployMapping(mappingId, input);
-        const label =
-          record.sourceType === 'revision'
-            ? `Rev ${record.sourceNumber}`
-            : `v${record.sourceNumber}`;
-        setDeployFeedback({
-          kind: 'success',
-          message: `${label} deployed to ${record.environment} successfully.`,
-          orchestration: {
-            orchestrationId: record.orchestrationId,
-            status: 'succeeded',
-          },
-          artifact: {
-            artifactId: record.artifactId,
-            artifactHash: record.artifactHash,
-          },
-        });
+        if (adapter.startDeployOperation) {
+          const runtimeEnvironment = toRuntimeEnvironment(input.environment);
+          const currentActiveArtifactId =
+            runtimeEnvironment === 'DEV'
+              ? currentDeployments?.DEV.deployment?.artifactId ?? null
+              : runtimeEnvironment === 'PREPROD'
+                ? currentDeployments?.PREPROD.deployment?.artifactId ?? null
+                : currentDeployments?.PROD.deployment?.artifactId ?? null;
 
-        await cancelDeploymentContextReads(queryClient, mappingId);
-        await Promise.all([refreshCurrentDeployments(), refreshHistory()]);
-        invalidateDeploymentDependents(queryClient, mappingId);
+          const accepted: DeploymentOperationAcceptedResponse = await adapter.startDeployOperation(
+            mappingId,
+            {
+              version: input.sourceNumber,
+              targetEnvironment: runtimeEnvironment,
+              expectedActiveArtifactId: currentActiveArtifactId,
+            },
+            createIdempotencyKey(`deploy:${mappingId}:${runtimeEnvironment}`),
+          );
+
+          setActiveOperation({
+            mappingId,
+            operationId: accepted.operationId,
+            actionKind: 'deploy',
+            targetEnvironment: runtimeEnvironment,
+          });
+        } else {
+          const record: DeploymentRecord = await adapter.deployMapping(mappingId, input);
+          const label =
+            record.sourceType === 'revision'
+              ? `Rev ${record.sourceNumber}`
+              : `v${record.sourceNumber}`;
+          setDeployFeedback({
+            kind: 'success',
+            message: `${label} deployed to ${record.environment} successfully.`,
+            orchestration: {
+              orchestrationId: record.orchestrationId,
+              status: 'succeeded',
+            },
+            artifact: {
+              artifactId: record.artifactId,
+              artifactHash: record.artifactHash,
+            },
+          });
+
+          await refreshDeploymentData();
+          setIsDeploying(false);
+        }
       } catch (err) {
         const cdmBlockIssues = parseCdmDeployBlockIssues(err);
         const technicalDetails = toDeploymentUiError(err, 'Deploy failed');
@@ -384,45 +712,84 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
           ...details,
         });
-      } finally {
         setIsDeploying(false);
       }
     },
     [
       adapter,
+      currentDeployments,
       mappingId,
-      queryClient,
-      refreshCurrentDeployments,
-      refreshHistory,
+      refreshDeploymentData,
     ],
   );
 
   const promote = useCallback(
-    async (fromEnvironment: Environment, toEnvironment: Environment): Promise<void> => {
+    async (fromEnvironment: Environment, toEnvironment: Environment, reason?: string): Promise<void> => {
       setIsDeploying(true);
       setDeployFeedback(null);
       try {
-        const record = await adapter.promoteDeployment(mappingId, {
-          fromEnvironment,
-          toEnvironment,
-        });
-        const label = `v${record.sourceNumber}`;
-        setDeployFeedback({
-          kind: 'success',
-          message: `${label} promoted from ${fromEnvironment} to ${toEnvironment} successfully.`,
-          orchestration: {
-            orchestrationId: record.orchestrationId,
-            status: 'succeeded',
-          },
-          artifact: {
-            artifactId: record.artifactId,
-            artifactHash: record.artifactHash,
-          },
-        });
+        const sourceEnvironment = toRuntimeEnvironment(fromEnvironment);
+        const targetEnvironment = toRuntimeEnvironment(toEnvironment);
 
-        await cancelDeploymentContextReads(queryClient, mappingId);
-        await Promise.all([refreshCurrentDeployments(), refreshHistory()]);
-        invalidateDeploymentDependents(queryClient, mappingId);
+        if (adapter.startPromotionOperation) {
+          const expectedSourceArtifactId =
+            sourceEnvironment === 'DEV'
+              ? currentDeployments?.DEV.deployment?.artifactId
+              : sourceEnvironment === 'PREPROD'
+                ? currentDeployments?.PREPROD.deployment?.artifactId
+                : currentDeployments?.PROD.deployment?.artifactId;
+
+          if (!expectedSourceArtifactId) {
+            throw new Error(`No active ${sourceEnvironment} artifact found for promotion.`);
+          }
+
+          const expectedTargetArtifactId =
+            targetEnvironment === 'DEV'
+              ? currentDeployments?.DEV.deployment?.artifactId ?? null
+              : targetEnvironment === 'PREPROD'
+                ? currentDeployments?.PREPROD.deployment?.artifactId ?? null
+                : currentDeployments?.PROD.deployment?.artifactId ?? null;
+
+          const accepted = await adapter.startPromotionOperation(
+            mappingId,
+            {
+              sourceEnvironment,
+              targetEnvironment,
+              expectedSourceArtifactId,
+              expectedTargetArtifactId,
+              ...(typeof reason === 'string' && reason.trim().length > 0 ? { reason: reason.trim() } : {}),
+            },
+            createIdempotencyKey(`promote:${mappingId}:${sourceEnvironment}:${targetEnvironment}`),
+          );
+
+          setActiveOperation({
+            mappingId,
+            operationId: accepted.operationId,
+            actionKind: 'promote',
+            targetEnvironment,
+          });
+        } else {
+          const record = await adapter.promoteDeployment(mappingId, {
+            fromEnvironment: sourceEnvironment,
+            toEnvironment: targetEnvironment,
+          });
+          const label = `v${record.sourceNumber}`;
+          setDeployFeedback({
+            kind: 'success',
+            message: `${label} promoted from ${sourceEnvironment} to ${targetEnvironment} successfully.`,
+            orchestration: {
+              orchestrationId: record.orchestrationId,
+              status: 'succeeded',
+            },
+            artifact: {
+              artifactId: record.artifactId,
+              artifactHash: record.artifactHash,
+            },
+          });
+
+          await refreshDeploymentData();
+          setIsDeploying(false);
+        }
       } catch (err) {
         const cdmBlockIssues = parseCdmDeployBlockIssues(err);
         const technicalDetails = toDeploymentUiError(err, 'Promote failed');
@@ -436,42 +803,78 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
           ...details,
         });
-      } finally {
         setIsDeploying(false);
       }
     },
-    [adapter, mappingId, queryClient, refreshCurrentDeployments, refreshHistory],
+    [adapter, currentDeployments, mappingId, refreshDeploymentData],
   );
 
   const rollback = useCallback(
-    async (env: Environment, deploymentSK: string): Promise<void> => {
+    async (env: Environment, deploymentSK: string, reason: string): Promise<void> => {
       setIsDeploying(true);
       setDeployFeedback(null);
       try {
-        const record = await adapter.rollbackDeployment(mappingId, {
-          environment: env,
-          deploymentSK,
-        });
-        const label =
-          record.sourceType === 'revision'
-            ? `Rev ${record.sourceNumber}`
-            : `v${record.sourceNumber}`;
-        setDeployFeedback({
-          kind: 'success',
-          message: `Rolled back ${env} to ${label}.`,
-          orchestration: {
-            orchestrationId: record.orchestrationId,
-            status: 'succeeded',
-          },
-          artifact: {
-            artifactId: record.artifactId,
-            artifactHash: record.artifactHash,
-          },
-        });
+        const runtimeEnvironment = toRuntimeEnvironment(env);
 
-        await cancelDeploymentContextReads(queryClient, mappingId);
-        await Promise.all([refreshCurrentDeployments(), refreshHistory()]);
-        invalidateDeploymentDependents(queryClient, mappingId);
+        if (adapter.startRollbackOperation) {
+          const targetRecord = deploymentHistory.find((record) => record.environmentDeployedAt === deploymentSK);
+          if (!targetRecord?.artifactId) {
+            throw new Error('Rollback target artifact is missing.');
+          }
+
+          const expectedActiveArtifactId =
+            runtimeEnvironment === 'DEV'
+              ? currentDeployments?.DEV.deployment?.artifactId
+              : runtimeEnvironment === 'PREPROD'
+                ? currentDeployments?.PREPROD.deployment?.artifactId
+                : currentDeployments?.PROD.deployment?.artifactId;
+
+          if (!expectedActiveArtifactId) {
+            throw new Error(`No active ${runtimeEnvironment} artifact found for rollback.`);
+          }
+
+          const accepted = await adapter.startRollbackOperation(
+            mappingId,
+            {
+              environment: runtimeEnvironment,
+              targetArtifactId: targetRecord.artifactId,
+              expectedActiveArtifactId,
+              reason,
+            },
+            createIdempotencyKey(`rollback:${mappingId}:${runtimeEnvironment}:${deploymentSK}`),
+          );
+
+          setActiveOperation({
+            mappingId,
+            operationId: accepted.operationId,
+            actionKind: 'rollback',
+            targetEnvironment: runtimeEnvironment,
+          });
+        } else {
+          const record = await adapter.rollbackDeployment(mappingId, {
+            environment: runtimeEnvironment,
+            deploymentSK,
+          });
+          const label =
+            record.sourceType === 'revision'
+              ? `Rev ${record.sourceNumber}`
+              : `v${record.sourceNumber}`;
+          setDeployFeedback({
+            kind: 'success',
+            message: `Rolled back ${runtimeEnvironment} to ${label}.`,
+            orchestration: {
+              orchestrationId: record.orchestrationId,
+              status: 'succeeded',
+            },
+            artifact: {
+              artifactId: record.artifactId,
+              artifactHash: record.artifactHash,
+            },
+          });
+
+          await refreshDeploymentData();
+          setIsDeploying(false);
+        }
       } catch (err) {
         const technicalDetails = toDeploymentUiError(err, 'Rollback failed');
         const message = formatErrorMessage(err, 'Rollback failed');
@@ -483,11 +886,10 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           technicalDetails,
           ...details,
         });
-      } finally {
         setIsDeploying(false);
       }
     },
-    [adapter, mappingId, queryClient, refreshCurrentDeployments, refreshHistory],
+    [adapter, currentDeployments, deploymentHistory, mappingId, refreshDeploymentData],
   );
 
   const clearDeployFeedback = useCallback(() => setDeployFeedback(null), []);
@@ -495,6 +897,12 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
   const refresh = useCallback(() => {
     void deploymentQuery.refetch();
   }, [deploymentQuery]);
+
+  useEffect(() => {
+    return () => {
+      clearPollingTimer();
+    };
+  }, [clearPollingTimer]);
 
   const result = useMemo<UseDeploymentPageResult>(
     () => ({

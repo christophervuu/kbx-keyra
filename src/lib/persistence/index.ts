@@ -57,6 +57,16 @@ export {
   updateStatus as updateDeploymentOrchestrationStatus,
 } from './deployment-orchestrations.js';
 export {
+  deploymentSummaries,
+  get as getDeploymentSummary,
+  initialize as initializeDeploymentSummary,
+  listByAttention as listDeploymentSummariesByAttention,
+  listByProject as listDeploymentSummariesByProject,
+  listGlobal as listDeploymentSummariesGlobal,
+  remove as removeDeploymentSummary,
+  upsert as upsertDeploymentSummary,
+} from './deployment-summaries.js';
+export {
   create as createMappingVersion,
   get as getMappingVersion,
   getConfig as getMappingVersionConfig,
@@ -171,6 +181,15 @@ export type {
   SchemaDerivedStatus,
   SchemaDraftItem,
   DeploymentCurrentItem,
+  DeploymentFreshness,
+  DeploymentOperationStatus,
+  DeploymentOperationType,
+  DeploymentPromotionState,
+  DeploymentAttentionState,
+  DeploymentSummaryEnvironmentState,
+  DeploymentSummaryItem,
+  InitializeDeploymentSummaryInput,
+  UpsertDeploymentSummaryInput,
   DeploymentHistoryItem,
   DeploymentEnvironment,
   DeploymentOrchestrationItem,

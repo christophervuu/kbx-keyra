@@ -217,4 +217,30 @@ describe('persistence s3/deployment-snapshot', () => {
       name: 'RuntimeSnapshotUnreadableError',
     });
   });
+
+  it('verifyRuntimeSnapshotReadHash validates bundle artifact hash when bundle payload is present', async () => {
+    const { buildDeploymentArtifactBundle } = await import('../../../../src/lib/deployment/artifact-bundle.js');
+
+    const bundle = buildDeploymentArtifactBundle({
+      mappingId: 'mapping-1',
+      sourceType: 'version',
+      sourceNumber: 1,
+      mappingConfig: makeConfig(),
+    });
+
+    s3SendMock.mockResolvedValueOnce({
+      Body: {
+        transformToString: vi.fn().mockResolvedValue(JSON.stringify(bundle)),
+      },
+    });
+
+    const mod = await importModule();
+    const result = await mod.verifyRuntimeSnapshotReadHash({
+      mappingId: 'mapping-1',
+      snapshotId: 'snapshot-1',
+      expectedContentHash: bundle.artifactHash,
+    });
+
+    expect(result.payload).toEqual(bundle);
+  });
 });

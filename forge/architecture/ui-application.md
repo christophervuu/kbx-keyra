@@ -3529,3 +3529,80 @@ UI status rendering must not collapse these into one aggregate status that hides
 - Deprecated versions remain resolvable for existing mappings and are hidden-by-default for new selection with explicit reveal + warning.
 - Archived families are hidden from default new selection while existing pinned mappings remain editable/deployable with warning semantics.
 
+---
+
+## FS-106 Deployment Management Rev 2 UI contract addendum
+
+FS-106 finalizes deployment UI architecture around projection-backed overview surfaces and operation-resource driven action surfaces.
+
+### Canonical route hierarchy
+
+- Global overview: `/deployments`
+- Project overview: `/projects/:projectId/deployments`
+- Mapping action surface: `/projects/:projectId/mappings/:mappingId/deploy`
+
+Global and project routes are overview + drill-down surfaces only. Mapping deployment remains the sole mutating action surface.
+
+### Data authority and UX state model
+
+UI must distinguish:
+
+- **operation progress/outcome** (operation resource)
+- **deployment freshness** per environment (`NOT_DEPLOYED|CURRENT|STALE`)
+
+Operation failure is not equivalent to freshness state and must be rendered separately.
+
+### Projection-backed overview pages
+
+Global and project deployment pages consume projection-backed aggregate APIs and support full-population semantics for:
+
+- filtering,
+- sorting,
+- pagination,
+- failed/attention summaries.
+
+Default sort:
+
+- `lastActivityAt DESC`
+- `projectName ASC`
+- `mappingName ASC`
+
+One row per mapping is required, including never-deployed mappings.
+
+### Mapping deployment action page
+
+Mapping deployment page contracts:
+
+- DEV deploy version selector is version-only and stable across refresh.
+- PREPROD/PROD actions are promotion-only.
+- Rollback targets retained eligible historical artifacts.
+- Operation polling uses `operationId` and resumes after refresh/navigation.
+- “What’s Changing” diff compares immutable versions/artifacts:
+  - DEV deploy: selected version vs active DEV artifact
+  - PREPROD promote: DEV active artifact vs PREPROD active artifact
+  - PROD promote: PREPROD active artifact vs PROD active artifact
+  - Rollback: active artifact vs selected rollback artifact
+
+### Reason policy UX
+
+- DEV deploy reason optional.
+- PREPROD promotion reason optional.
+- PROD promotion reason required.
+- Rollback reason required (all environments).
+- Retry reason optional.
+
+Required reasons must be validated before mutation submission.
+
+### Removed environment behavior
+
+UI executable contracts do not accept or surface `SANDBOX`, `QA`, or `STAGING` as active deployment environments.
+
+Legacy mentions may remain in historical changelog/docs only.
+
+### Shared components requirement
+
+Global and project pages should share deployment table/status/summary components to keep canonical status labeling and filtering semantics consistent.
+
+### Mapping Editor boundary
+
+No deployment mutations are introduced in Mapping Editor. Save/version flows remain separate from deploy/promote/rollback flows.

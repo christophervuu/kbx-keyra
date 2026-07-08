@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Home, Layout, Library, Settings } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Home, Layout, Library, Rocket, Settings } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 
@@ -6,6 +6,7 @@ import { PATHS } from '@/routes';
 
 const NAV_ITEMS = [
   { to: PATHS.HOME, label: 'Home', icon: Home },
+  { to: PATHS.DEPLOYMENTS, label: 'Deployments', icon: Rocket },
   { to: PATHS.VALUE_MAPPINGS, label: 'Value Mappings', icon: Library },
   { to: PATHS.SCHEMA_LIBRARY, label: 'Schemas', icon: Library },
   { to: PATHS.TEMPLATE_LIBRARY, label: 'Templates', icon: Layout },

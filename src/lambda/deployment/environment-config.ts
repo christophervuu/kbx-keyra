@@ -1,4 +1,4 @@
-export type RuntimeEnvironmentKey = 'SANDBOX' | 'DEV' | 'PREPROD' | 'PROD';
+export type RuntimeEnvironmentKey = 'DEV' | 'PREPROD' | 'PROD';
 
 export interface RuntimeEnvironmentRetryPolicy {
   readonly maxAttempts: number;
@@ -9,6 +9,9 @@ export interface RuntimeEnvironmentRetryPolicy {
 export interface RuntimeEnvironmentConfig {
   readonly key: RuntimeEnvironmentKey;
   readonly accountId?: string;
+  readonly assumeRoleArn?: string;
+  readonly runtimeRegion?: string;
+  readonly authMode: 'AWS_IAM' | 'NONE';
   readonly label: string;
   readonly runtimeApiBaseUrl: string;
   readonly deployApiPath: string;
@@ -18,6 +21,11 @@ export interface RuntimeEnvironmentConfig {
   readonly requestTimeoutMs: number;
   readonly retryPolicy: RuntimeEnvironmentRetryPolicy;
 }
+
+type RuntimeEnvironmentConfigInput = Omit<RuntimeEnvironmentConfig, 'retryPolicy' | 'authMode'> & {
+  readonly authMode?: 'AWS_IAM' | 'NONE';
+  readonly retryPolicy?: Partial<RuntimeEnvironmentRetryPolicy>;
+};
 
 export interface DeploymentEnvironmentSettings {
   readonly deploymentEnvironments: readonly RuntimeEnvironmentConfig[];
@@ -39,8 +47,8 @@ export class DeploymentEnvironmentConfigError extends Error {
   }
 }
 
-const ENV_KEYS: readonly RuntimeEnvironmentKey[] = ['SANDBOX', 'DEV', 'PREPROD', 'PROD'];
-const DEFAULT_PROMOTION_SEQUENCE: readonly RuntimeEnvironmentKey[] = ['SANDBOX', 'DEV', 'PREPROD', 'PROD'];
+const ENV_KEYS: readonly RuntimeEnvironmentKey[] = ['DEV', 'PREPROD', 'PROD'];
+const DEFAULT_PROMOTION_SEQUENCE: readonly RuntimeEnvironmentKey[] = ['DEV', 'PREPROD', 'PROD'];
 
 const DEFAULT_RETRY_POLICY: RuntimeEnvironmentRetryPolicy = {
   maxAttempts: 3,
@@ -113,23 +121,25 @@ function normalizePath(value: string | undefined, fallback: string, fieldName: s
 }
 
 function validateEnvironmentKey(value: unknown, fieldName: string): RuntimeEnvironmentKey {
-  if (value === 'SANDBOX' || value === 'DEV' || value === 'PREPROD' || value === 'PROD') {
+  if (value === 'DEV' || value === 'PREPROD' || value === 'PROD') {
     return value;
   }
 
-  throw new DeploymentEnvironmentConfigError(`${fieldName} must be one of SANDBOX|DEV|PREPROD|PROD.`);
+  throw new DeploymentEnvironmentConfigError(`${fieldName} must be one of DEV|PREPROD|PROD.`);
 }
 
 function normalizeRuntimeEnvironmentConfig(
-  input: Omit<RuntimeEnvironmentConfig, 'retryPolicy'> & {
-    retryPolicy?: Partial<RuntimeEnvironmentRetryPolicy>;
-  },
+  input: RuntimeEnvironmentConfigInput,
 ): RuntimeEnvironmentConfig {
   const key = validateEnvironmentKey(input.key, 'deploymentEnvironments[].key');
+  const authMode = input.authMode === 'AWS_IAM' ? 'AWS_IAM' : 'NONE';
 
   return {
     key,
     accountId: input.accountId,
+    assumeRoleArn: input.assumeRoleArn,
+    runtimeRegion: input.runtimeRegion,
+    authMode,
     label: input.label,
     runtimeApiBaseUrl: normalizeBaseUrl(input.runtimeApiBaseUrl, `deploymentEnvironments[${key}].runtimeApiBaseUrl`),
     deployApiPath: normalizePath(input.deployApiPath, DEFAULT_PATHS.deployApiPath, `deploymentEnvironments[${key}].deployApiPath`),
@@ -175,9 +185,7 @@ function ensureNoDuplicateEnvironmentKeys(settings: DeploymentEnvironmentSetting
 }
 
 function normalizeSettings(input: {
-  deploymentEnvironments: readonly (Omit<RuntimeEnvironmentConfig, 'retryPolicy'> & {
-    retryPolicy?: Partial<RuntimeEnvironmentRetryPolicy>;
-  })[];
+  deploymentEnvironments: readonly RuntimeEnvironmentConfigInput[];
   promotionPolicy?: {
     sequence?: readonly RuntimeEnvironmentKey[];
     allowSkip?: boolean;
@@ -220,7 +228,7 @@ export function parseDeploymentEnvironmentSettingsJson(rawJson: string): Deploym
 
   return normalizeSettings({
     deploymentEnvironments: deploymentEnvironments as Array<
-      Omit<RuntimeEnvironmentConfig, 'retryPolicy'> & { retryPolicy?: Partial<RuntimeEnvironmentRetryPolicy> }
+      RuntimeEnvironmentConfigInput
     >,
     promotionPolicy,
     source: 'env-json',
@@ -258,6 +266,7 @@ export function parseDeploymentEnvironmentSettingsFromEnv(
 
   const deploymentEnvironments = configuredKeys.map((key): Omit<RuntimeEnvironmentConfig, 'retryPolicy'> & {
     retryPolicy?: Partial<RuntimeEnvironmentRetryPolicy>;
+    authMode?: 'AWS_IAM' | 'NONE';
   } => {
     const runtimeApiBaseUrl = readEnv(env, `RUNTIME_API_BASE_URL_${key}`);
     if (!runtimeApiBaseUrl) {
@@ -275,6 +284,9 @@ export function parseDeploymentEnvironmentSettingsFromEnv(
     return {
       key,
       accountId: readEnv(env, `RUNTIME_ACCOUNT_ID_${key}`),
+      assumeRoleArn: readEnv(env, `RUNTIME_ASSUME_ROLE_ARN_${key}`),
+      runtimeRegion: readEnv(env, `RUNTIME_REGION_${key}`) ?? readEnv(env, 'AWS_REGION') ?? readEnv(env, 'AWS_DEFAULT_REGION'),
+      authMode: readEnv(env, `RUNTIME_API_AUTH_MODE_${key}`) === 'AWS_IAM' ? 'AWS_IAM' : 'NONE',
       label: readEnv(env, `RUNTIME_LABEL_${key}`) ?? key,
       runtimeApiBaseUrl,
       deployApiPath: readEnv(env, `RUNTIME_DEPLOY_API_PATH_${key}`) ?? DEFAULT_PATHS.deployApiPath,

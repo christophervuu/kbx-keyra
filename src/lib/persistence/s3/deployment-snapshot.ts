@@ -1,8 +1,9 @@
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 
 import { computeConfigHash } from '../hash.js';
+import { computeArtifactHashFromBundlePayload } from '../../deployment/artifact-bundle.js';
 
 import { s3Client } from '../clients.js';
 import { BUCKET_NAME, RUNTIME_BUCKET_NAME, SNAPSHOTS_PREFIX, deploymentSnapshotKey, runtimeSnapshotKey } from '../config.js';
@@ -31,6 +32,15 @@ export async function put(
   );
 
   return key;
+}
+
+export async function remove(key: string): Promise<void> {
+  await s3Client.send(
+    new DeleteObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+    }),
+  );
 }
 
 interface PutRuntimeSnapshotInput {
@@ -172,14 +182,27 @@ function getPayloadConfig(payload: unknown): unknown {
   return payload;
 }
 
+function hasBundleShape(payload: unknown): payload is {
+  readonly bundleFormatVersion: unknown;
+  readonly manifest: unknown;
+} {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  const record = payload as Record<string, unknown>;
+  return Object.hasOwn(record, 'bundleFormatVersion') && Object.hasOwn(record, 'manifest');
+}
+
 export async function verifyRuntimeSnapshotReadHash(input: {
   readonly mappingId: string;
   readonly snapshotId: string;
   readonly expectedContentHash: string;
 }): Promise<RuntimeSnapshotReadResult> {
   const readResult = await getRuntimeSnapshot(input.mappingId, input.snapshotId);
-  const config = getPayloadConfig(readResult.payload) as MappingConfig;
-  const computedHash = await computeConfigHash(config);
+  const computedHash = hasBundleShape(readResult.payload)
+    ? computeArtifactHashFromBundlePayload(readResult.payload)
+    : await computeConfigHash(getPayloadConfig(readResult.payload) as MappingConfig);
 
   if (computedHash !== input.expectedContentHash) {
     throw new RuntimeSnapshotUnreadableError(
@@ -226,6 +249,7 @@ export async function putRuntimeSnapshot(input: PutRuntimeSnapshotInput): Promis
 
 export const deploymentSnapshot = {
   put,
+  remove,
   putRuntimeSnapshot,
   getRuntimeSnapshot,
   verifyRuntimeSnapshotReadHash,

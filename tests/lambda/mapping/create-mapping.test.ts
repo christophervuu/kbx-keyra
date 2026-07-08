@@ -15,11 +15,18 @@ const sharedMocks = vi.hoisted(() => ({
   ERROR_CODES: { VALIDATION_ERROR: 'VALIDATION_ERROR' },
 }));
 
+const deploymentSummariesMocks = vi.hoisted(() => ({
+  initialize: vi.fn(),
+}));
+
 vi.mock('../../../src/engine/index.js', () => ({
   validate: validateMock,
 }));
 
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
+vi.mock('../../../src/lib/persistence/deployment-summaries.js', () => ({
+  initialize: deploymentSummariesMocks.initialize,
+}));
 
 async function importHandler() {
   return import('../../../src/lambda/mapping/create-mapping.js');
@@ -55,6 +62,7 @@ describe('create-mapping handler', () => {
     sharedMocks.getObject.mockReset().mockResolvedValue('');
     sharedMocks.putItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.putObject.mockReset().mockResolvedValue(undefined);
+    deploymentSummariesMocks.initialize.mockReset().mockResolvedValue(undefined);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
     sharedMocks.internalError.mockReset().mockReturnValue({ code: 'INTERNAL_ERROR', message: 'err', statusCode: 500, retryable: true });
@@ -87,6 +95,7 @@ describe('create-mapping handler', () => {
     expect(parsed.mappingId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(sharedMocks.putObject).toHaveBeenCalledTimes(1);
     expect(sharedMocks.putItem).toHaveBeenCalledTimes(1);
+    expect(deploymentSummariesMocks.initialize).toHaveBeenCalledTimes(1);
   });
 
   it('omitted businessContext remains backward compatible', async () => {

@@ -1,5 +1,9 @@
 import type { MappingConfig } from '../../lib/persistence/types.js';
-import { computeConfigHash } from '../../lib/persistence/hash.js';
+import {
+  buildDeploymentArtifactBundle,
+  type DeploymentArtifactBundle,
+} from '../../lib/deployment/artifact-bundle.js';
+import { computeStableJsonSha256 } from '../../lib/persistence/hash.js';
 import { getRuntimeApiClient, toRuntimeRelayClient } from './runtime-api-client.js';
 import {
   DeploymentEnvironmentConfigError,
@@ -19,6 +23,8 @@ export interface RuntimeDeployArtifact {
   readonly sourceConfigHash: string;
   readonly engineVersion: string;
   readonly mappingConfig: MappingConfig;
+  readonly bundleFormatVersion: number;
+  readonly manifest: DeploymentArtifactBundle['manifest'];
 }
 
 export interface RuntimeRelayResult {
@@ -54,32 +60,6 @@ export interface RuntimeRelayClient {
 
 const MAX_ARTIFACT_PAYLOAD_BYTES_DEFAULT = 5 * 1024 * 1024; // 5MB (FS-083 Rev 2)
 
-function normalizeMappingConfigForArtifact(config: MappingConfig): MappingConfig {
-  const sanitizedRules = Array.isArray(config.rules)
-    ? config.rules.map((rule) => {
-      const noMatch = rule.noMatchBehavior;
-      const normalizedNoMatch = noMatch
-        ? {
-            mode: noMatch.mode,
-            ...(noMatch.mode === 'fallback_value' && noMatch.fallbackValue !== undefined
-              ? { fallbackValue: noMatch.fallbackValue }
-              : {}),
-          }
-        : undefined;
-
-      return {
-        ...rule,
-        ...(normalizedNoMatch ? { noMatchBehavior: normalizedNoMatch } : {}),
-      };
-    })
-    : [];
-
-  return {
-    ...config,
-    rules: sanitizedRules,
-  };
-}
-
 function parseMaxPayloadBytes(value: string | undefined): number {
   if (!value) {
     return MAX_ARTIFACT_PAYLOAD_BYTES_DEFAULT;
@@ -103,7 +83,7 @@ export function maxDeployArtifactPayloadBytes(): number {
 }
 
 export function buildArtifactId(mappingId: string, sourceType: RuntimeDeploymentSourceType, sourceNumber: number): string {
-  return `${mappingId}:${sourceType}:${sourceNumber}`;
+  return `artifact:${computeStableJsonSha256({ mappingId, sourceType, sourceNumber })}`;
 }
 
 export async function buildRuntimeDeployArtifact(input: {
@@ -112,20 +92,25 @@ export async function buildRuntimeDeployArtifact(input: {
   sourceNumber: number;
   config: MappingConfig;
 }): Promise<RuntimeDeployArtifact> {
-  const normalizedConfig = normalizeMappingConfigForArtifact(input.config);
-  const artifactHash = await computeConfigHash(normalizedConfig);
-  const artifactId = buildArtifactId(input.mappingId, input.sourceType, input.sourceNumber);
-
-  return {
-    artifactId,
-    artifactHash,
-    snapshotId: artifactId,
+  const bundle = buildDeploymentArtifactBundle({
     mappingId: input.mappingId,
     sourceType: input.sourceType,
     sourceNumber: input.sourceNumber,
-    sourceConfigHash: artifactHash,
-    engineVersion: normalizedConfig.engineVersion,
-    mappingConfig: normalizedConfig,
+    mappingConfig: input.config,
+  });
+
+  return {
+    artifactId: bundle.artifactId,
+    artifactHash: bundle.artifactHash,
+    snapshotId: bundle.artifactId,
+    mappingId: input.mappingId,
+    sourceType: input.sourceType,
+    sourceNumber: input.sourceNumber,
+    sourceConfigHash: bundle.artifactHash,
+    engineVersion: bundle.engineVersion,
+    mappingConfig: bundle.mappingConfig,
+    bundleFormatVersion: bundle.bundleFormatVersion,
+    manifest: bundle.manifest,
   };
 }
 

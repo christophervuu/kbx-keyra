@@ -40,6 +40,26 @@ function unimplementedAsync<T>() {
   return vi.fn<(...args: unknown[]) => Promise<T>>().mockRejectedValue(new Error('not implemented in test'));
 }
 
+function createStorageMock(): Storage {
+  const store = new Map<string, string>();
+  return {
+    get length() {
+      return store.size;
+    },
+    clear: () => {
+      store.clear();
+    },
+    getItem: (key: string) => store.get(key) ?? null,
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+  };
+}
+
 const VERSIONS: MappingVersion[] = [
   { version: 4, revisionNumber: 11, createdAt: '2026-01-04T10:00:00Z', createdBy: 'alice' },
   { version: 3, revisionNumber: 10, createdAt: '2026-01-03T10:00:00Z', createdBy: 'alice' },
@@ -181,6 +201,8 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     listRevisions: vi.fn().mockResolvedValue([]),
     getCurrentDeployments: vi.fn().mockResolvedValue(CURRENT_DEPLOYMENTS),
     listDeployments: vi.fn().mockResolvedValue(HISTORY),
+    listGlobalDeploymentSummaries: vi.fn(),
+    listProjectDeploymentSummaries: vi.fn(),
     deployMapping: vi.fn().mockResolvedValue(DEPLOY_RECORD),
     promoteDeployment: vi.fn().mockResolvedValue(PROMOTE_RECORD),
     rollbackDeployment: vi.fn().mockResolvedValue(ROLLBACK_RECORD),
@@ -231,6 +253,12 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     linkPublishedSchema: vi.fn<(input: LinkPublishedSchemaInput) => Promise<SchemaMetadata>>(),
     autoMap: unimplementedAsync(),
     autoMapSection: unimplementedAsync(),
+    getAutoMapCapabilities: unimplementedAsync(),
+    getAutoMapSession: unimplementedAsync(),
+    startAutoMapSession: unimplementedAsync(),
+    startAutoMapRun: unimplementedAsync(),
+    getAutoMapRunStatus: unimplementedAsync(),
+    listAutoMapSuggestions: unimplementedAsync(),
     suggestExpression: unimplementedAsync(),
     explainRule: unimplementedAsync(),
     smartFix: unimplementedAsync(),
@@ -259,6 +287,15 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getGlobalValueMapRevision: vi.fn(),
     archiveGlobalValueMap: vi.fn(),
     getGlobalValueMapUsage: vi.fn(),
+    listProjectValueMaps: vi.fn(),
+    linkProjectValueMap: vi.fn(),
+    getProjectValueMapDetail: vi.fn(),
+    updateProjectValueMapOverlay: vi.fn(),
+    reviewProjectValueMapUpdate: vi.fn(),
+    acceptProjectValueMapUpdate: vi.fn(),
+    unlinkProjectValueMap: vi.fn(),
+    importProjectValueMapPortable: vi.fn(),
+    promoteProjectValueMap: vi.fn(),
     ...overrides,
   };
 
@@ -287,24 +324,24 @@ function renderPage(adapter: ApiAdapter) {
 describe('DeploymentPage (FS-100 T-08)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('localStorage', createStorageMock());
+    globalThis.localStorage?.removeItem?.('keyra:active-deployment-operation');
   });
 
-  it('renders four environment cards in canonical order', async () => {
+  it('renders three environment cards in canonical order', async () => {
     renderPage(createMockAdapter());
     await waitFor(() => screen.getByTestId('deployment-pipeline-cards'));
 
     const cards = [
-      screen.getByTestId('pipeline-card-SANDBOX'),
       screen.getByTestId('pipeline-card-DEV'),
       screen.getByTestId('pipeline-card-PREPROD'),
       screen.getByTestId('pipeline-card-PROD'),
     ];
 
-    expect(cards[0]?.textContent).toContain('SANDBOX');
-    expect(cards[1]?.textContent).toContain('DEV');
-    expect(cards[2]?.textContent).toContain('Preprod');
-    expect(cards[3]?.textContent).toContain('PROD');
-    expect(screen.getByTestId('pipeline-card-SANDBOX').getAttribute('aria-selected')).toBe('true');
+    expect(cards[0]?.textContent).toContain('DEV');
+    expect(cards[1]?.textContent).toContain('Preprod');
+    expect(cards[2]?.textContent).toContain('PROD');
+    expect(screen.getByTestId('pipeline-card-DEV').getAttribute('aria-selected')).toBe('true');
   });
 
   it('renders refresh status and refresh action without blanking content', async () => {
@@ -327,7 +364,7 @@ describe('DeploymentPage (FS-100 T-08)', () => {
     renderPage(createMockAdapter());
     await waitFor(() => screen.getByTestId('primary-deployment-action'));
 
-    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Deploy v4 to SANDBOX');
+    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Deploy v4 to DEV');
 
     await user.click(screen.getByTestId('pipeline-card-PREPROD'));
     expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Promote DEV snapshot to PREPROD');
@@ -336,36 +373,36 @@ describe('DeploymentPage (FS-100 T-08)', () => {
     expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Promote PREPROD snapshot to PROD');
 
     await user.click(screen.getByTestId('pipeline-card-DEV'));
-    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Promote SANDBOX snapshot to DEV');
+    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Deploy v4 to DEV');
   });
 
   it('supports keyboard navigation across pipeline tabs', async () => {
     const user = userEvent.setup();
     renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('pipeline-card-SANDBOX'));
+    await waitFor(() => screen.getByTestId('pipeline-card-DEV'));
 
-    const sandboxCard = screen.getByTestId('pipeline-card-SANDBOX');
-    sandboxCard.focus();
-    expect(sandboxCard.getAttribute('aria-selected')).toBe('true');
+    const devCard = screen.getByTestId('pipeline-card-DEV');
+    devCard.focus();
+    expect(devCard.getAttribute('aria-selected')).toBe('true');
 
     await user.keyboard('{ArrowRight}');
     await waitFor(() => {
-      expect(screen.getByTestId('pipeline-card-DEV').getAttribute('aria-selected')).toBe('true');
+      expect(screen.getByTestId('pipeline-card-PREPROD').getAttribute('aria-selected')).toBe('true');
     });
 
     await user.keyboard('{ArrowLeft}');
     await waitFor(() => {
-      expect(screen.getByTestId('pipeline-card-SANDBOX').getAttribute('aria-selected')).toBe('true');
+      expect(screen.getByTestId('pipeline-card-DEV').getAttribute('aria-selected')).toBe('true');
     });
 
     await user.keyboard('{ArrowDown}');
     await waitFor(() => {
-      expect(screen.getByTestId('pipeline-card-DEV').getAttribute('aria-selected')).toBe('true');
+      expect(screen.getByTestId('pipeline-card-PREPROD').getAttribute('aria-selected')).toBe('true');
     });
 
     await user.keyboard('{ArrowUp}');
     await waitFor(() => {
-      expect(screen.getByTestId('pipeline-card-SANDBOX').getAttribute('aria-selected')).toBe('true');
+      expect(screen.getByTestId('pipeline-card-DEV').getAttribute('aria-selected')).toBe('true');
     });
 
     expect(screen.getByRole('tablist', { name: /Deployment stage selector/i })).toBeTruthy();
@@ -566,5 +603,83 @@ describe('DeploymentPage (FS-100 T-08)', () => {
     );
 
     prefetchSpy.mockRestore();
+  });
+
+  it('requires reason for PROD promotion and allows optional reason for PREPROD promotion', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter();
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('primary-deployment-action'));
+
+    await user.click(screen.getByTestId('pipeline-card-PROD'));
+    await user.click(screen.getByTestId('primary-deployment-action'));
+    await waitFor(() => screen.getByTestId('confirm-dialog'));
+
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
+    await waitFor(() => screen.getByTestId('deployment-action-reason-error'));
+    expect(screen.getByTestId('deployment-action-reason-error').textContent).toContain('Reason is required for PROD promotion.');
+
+    await user.type(screen.getByTestId('deployment-action-reason-input'), 'release approval');
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
+    await waitFor(() => {
+      expect(adapter.promoteDeployment).toHaveBeenCalledWith('map-1', {
+        fromEnvironment: 'PREPROD',
+        toEnvironment: 'PROD',
+      });
+    });
+
+    await user.click(screen.getByTestId('pipeline-card-PREPROD'));
+    await user.click(screen.getByTestId('primary-deployment-action'));
+    await waitFor(() => screen.getByTestId('confirm-dialog'));
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
+    await waitFor(() => {
+      expect(adapter.promoteDeployment).toHaveBeenCalledWith('map-1', {
+        fromEnvironment: 'DEV',
+        toEnvironment: 'PREPROD',
+      });
+    });
+  });
+
+  it('requires reason for rollback before confirming action', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter();
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('secondary-rollback-action'));
+
+    await user.click(screen.getByTestId('secondary-rollback-action'));
+    await waitFor(() => screen.getByTestId('confirm-dialog'));
+
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
+    await waitFor(() => screen.getByTestId('rollback-reason-error'));
+    expect(screen.getByTestId('rollback-reason-error').textContent).toContain('Reason is required for rollback.');
+
+    await user.type(screen.getByTestId('rollback-reason-input'), 'rollback due to incident');
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
+
+    await waitFor(() => {
+      expect(adapter.rollbackDeployment).toHaveBeenCalledWith('map-1', {
+        environment: 'DEV',
+        deploymentSK: 'DEV#2026-01-03T12:00:00Z',
+      });
+    });
+  });
+
+  it('renders immutable diff summary content for deploy and promotion stages', async () => {
+    const user = userEvent.setup();
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('deployment-diff-summary'));
+
+    expect(screen.getByTestId('deployment-diff-summary').textContent).toContain('What’s Changing (DEV deploy)');
+    expect(screen.getByTestId('deployment-diff-summary').textContent).toContain('Compares immutable version payload against active DEV artifact manifest.');
+
+    await user.click(screen.getByTestId('pipeline-card-PREPROD'));
+    await waitFor(() => {
+      expect(screen.getByTestId('deployment-diff-summary').textContent).toContain('What’s Changing (DEV → PREPROD)');
+    });
+
+    await user.click(screen.getByTestId('pipeline-card-PROD'));
+    await waitFor(() => {
+      expect(screen.getByTestId('deployment-diff-summary').textContent).toContain('What’s Changing (PREPROD → PROD)');
+    });
   });
 });

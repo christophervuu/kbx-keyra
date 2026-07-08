@@ -18,6 +18,7 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import { initialize as initializeDeploymentSummary } from '../../lib/persistence/deployment-summaries.js';
 
 interface SchemaRef {
   readonly schemaId: string;
@@ -530,6 +531,17 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     await putItem({
       TableName: getMappingsTableOrThrow(),
       Item: metadata,
+    });
+
+    await initializeDeploymentSummary({
+      mappingId,
+      projectId: metadata.projectId,
+      mappingName: metadata.name,
+      latestVersion: null,
+      latestVersionCreatedAt: null,
+      actorId: 'development:system',
+      actorDisplayName: 'Development',
+      occurredAt: now,
     });
 
     return jsonResponse(201, metadata);

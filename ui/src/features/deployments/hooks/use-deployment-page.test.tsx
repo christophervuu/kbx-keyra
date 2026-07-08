@@ -36,6 +36,26 @@ function unimplementedAsync<T>() {
   return vi.fn<(...args: unknown[]) => Promise<T>>().mockRejectedValue(new Error('not implemented in test'));
 }
 
+function createStorageMock(): Storage {
+  const store = new Map<string, string>();
+  return {
+    get length() {
+      return store.size;
+    },
+    clear: () => {
+      store.clear();
+    },
+    getItem: (key: string) => store.get(key) ?? null,
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+  };
+}
+
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   const adapter: ApiAdapter = {
     getDeploymentContext: vi.fn().mockResolvedValue({
@@ -61,6 +81,8 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
       QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
     }),
     listDeployments: vi.fn().mockResolvedValue([]),
+    listGlobalDeploymentSummaries: vi.fn(),
+    listProjectDeploymentSummaries: vi.fn(),
     deployMapping: vi.fn().mockResolvedValue({
       mappingId: 'map-1',
       environmentDeployedAt: 'DEV#2026-01-02T01:00:00Z',
@@ -121,6 +143,12 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     linkPublishedSchema: vi.fn<(input: LinkPublishedSchemaInput) => Promise<SchemaMetadata>>(),
     autoMap: unimplementedAsync(),
     autoMapSection: unimplementedAsync(),
+    getAutoMapCapabilities: unimplementedAsync(),
+    getAutoMapSession: unimplementedAsync(),
+    startAutoMapSession: unimplementedAsync(),
+    startAutoMapRun: unimplementedAsync(),
+    getAutoMapRunStatus: unimplementedAsync(),
+    listAutoMapSuggestions: unimplementedAsync(),
     suggestExpression: unimplementedAsync(),
     explainRule: unimplementedAsync(),
     smartFix: unimplementedAsync(),
@@ -149,6 +177,15 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getGlobalValueMapRevision: vi.fn(),
     archiveGlobalValueMap: vi.fn(),
     getGlobalValueMapUsage: vi.fn(),
+    listProjectValueMaps: vi.fn(),
+    linkProjectValueMap: vi.fn(),
+    getProjectValueMapDetail: vi.fn(),
+    updateProjectValueMapOverlay: vi.fn(),
+    reviewProjectValueMapUpdate: vi.fn(),
+    acceptProjectValueMapUpdate: vi.fn(),
+    unlinkProjectValueMap: vi.fn(),
+    importProjectValueMapPortable: vi.fn(),
+    promoteProjectValueMap: vi.fn(),
     ...overrides,
   };
 
@@ -167,9 +204,13 @@ function makeWrapper(adapter: ApiAdapter) {
 }
 
 describe('useDeploymentPage', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('localStorage', createStorageMock());
+    globalThis.localStorage?.removeItem?.('keyra:active-deployment-operation');
+  });
 
-  it('defaults to SANDBOX and bootstraps from deploy-context + versions/current/history', async () => {
+  it('defaults to DEV and bootstraps from deploy-context + versions/current/history', async () => {
     const adapter = createMockAdapter();
     const { result } = renderHook(() => useDeploymentPage('map-1'), {
       wrapper: makeWrapper(adapter),
@@ -179,7 +220,7 @@ describe('useDeploymentPage', () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.environment).toBe('SANDBOX');
+    expect(result.current.environment).toBe('DEV');
     expect(adapter.getDeploymentContext).toHaveBeenCalledWith('map-1');
     expect(adapter.listVersions).toHaveBeenCalledWith('map-1');
     expect(adapter.listRevisions).not.toHaveBeenCalled();
@@ -266,5 +307,55 @@ describe('useDeploymentPage', () => {
       expect(result.current.deployFeedback.technicalDetails?.requestId).toBe('req-deploy-409');
       expect(result.current.deployFeedback.technicalDetails?.code).toBe('DEPLOY_BLOCKED_CDM_SCHEMA_STATE');
     }
+  });
+
+  it('resumes polling from persisted operation state after refresh', async () => {
+    globalThis.localStorage?.setItem?.(
+      'keyra:active-deployment-operation',
+      JSON.stringify({
+        mappingId: 'map-1',
+        operationId: 'op-123',
+        actionKind: 'deploy',
+        targetEnvironment: 'DEV',
+      }),
+    );
+
+    const adapter = createMockAdapter({
+      getDeploymentOperation: vi.fn().mockResolvedValue({
+        operationId: 'op-123',
+        mappingId: 'map-1',
+        projectId: 'proj-1',
+        operationType: 'DEPLOY',
+        operationStatus: 'SUCCEEDED',
+        operationStage: 'FINALIZING',
+        sourceEnvironment: null,
+        targetEnvironment: 'DEV',
+        sourceVersion: 2,
+        artifactId: 'artifact-2',
+        artifactHash: 'hash-2',
+        requestedBy: { actorType: 'DEVELOPMENT', actorId: 'development:system' },
+        requestedAt: '2026-01-02T01:00:00Z',
+        startedAt: '2026-01-02T01:00:01Z',
+        completedAt: '2026-01-02T01:00:02Z',
+        failureCode: null,
+        failureMessage: null,
+        retryable: false,
+        retryOfOperationId: null,
+      }),
+    });
+
+    const { result } = renderHook(() => useDeploymentPage('map-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => {
+      expect(adapter.getDeploymentOperation).toHaveBeenCalledWith('op-123');
+    });
+
+    await waitFor(() => {
+      expect(result.current.deployFeedback?.kind).toBe('success');
+    });
+
+    expect(globalThis.localStorage?.getItem?.('keyra:active-deployment-operation') ?? null).toBeNull();
   });
 });

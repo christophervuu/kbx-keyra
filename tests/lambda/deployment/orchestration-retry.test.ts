@@ -4,6 +4,10 @@ const orchestrationPersistenceMocks = vi.hoisted(() => ({
   updateStatus: vi.fn(),
 }));
 
+const deploymentSummariesMocks = vi.hoisted(() => ({
+  upsert: vi.fn(),
+}));
+
 const environmentConfigMocks = vi.hoisted(() => ({
   loadDeploymentEnvironmentSettings: vi.fn(),
   getRuntimeEnvironmentConfig: vi.fn(),
@@ -11,6 +15,10 @@ const environmentConfigMocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/lib/persistence/deployment-orchestrations.js', () => ({
   updateStatus: orchestrationPersistenceMocks.updateStatus,
+}));
+
+vi.mock('../../../src/lib/persistence/deployment-summaries.js', () => ({
+  upsert: deploymentSummariesMocks.upsert,
 }));
 
 vi.mock('../../../src/lambda/deployment/environment-config.js', () => ({
@@ -28,6 +36,7 @@ describe('orchestration retry', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
 
     orchestrationPersistenceMocks.updateStatus.mockReset().mockResolvedValue(undefined);
+    deploymentSummariesMocks.upsert.mockReset().mockResolvedValue(undefined);
     environmentConfigMocks.loadDeploymentEnvironmentSettings.mockReset().mockResolvedValue({
       deploymentEnvironments: [
         {
@@ -67,6 +76,8 @@ describe('orchestration retry', () => {
 
     const result = await mod.executeRuntimeOperationWithRetry({
       mappingId: 'map-1',
+      projectId: 'proj-1',
+      mappingName: 'Map 1',
       environment: 'DEV',
       operationType: 'deploy',
       orchestrationId: 'orc-1',
@@ -92,6 +103,7 @@ describe('orchestration retry', () => {
     expect(orchestrationPersistenceMocks.updateStatus).toHaveBeenCalledWith(
       expect.objectContaining({ orchestrationId: 'orc-1', status: 'retrying', attemptCount: 1 }),
     );
+    expect(deploymentSummariesMocks.upsert).toHaveBeenCalled();
   });
 
   it('reconciles timeout as success when runtime status indicates deployed state', async () => {
@@ -147,6 +159,8 @@ describe('orchestration retry', () => {
     const mod = await importRetryModule();
     const result = await mod.executeRuntimeOperationWithRetry({
       mappingId: 'map-1',
+      projectId: 'proj-1',
+      mappingName: 'Map 1',
       environment: 'DEV',
       operationType: 'rollback',
       orchestrationId: 'orc-3',
@@ -182,5 +196,6 @@ describe('orchestration retry', () => {
     expect(orchestrationPersistenceMocks.updateStatus).toHaveBeenCalledWith(
       expect.objectContaining({ orchestrationId: 'orc-3', status: 'failed', lastErrorCode: 'ARTIFACT_NOT_PRESENT' }),
     );
+    expect(deploymentSummariesMocks.upsert).toHaveBeenCalled();
   });
 });

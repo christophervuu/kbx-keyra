@@ -490,3 +490,115 @@ FS-105 migration/backfill execution should run with:
 
 Infrastructure must preserve immutable schema artifact references in deployment snapshots and runtime-local artifact storage so deploy/promote/rollback remain reproducible across later schema lifecycle changes.
 
+---
+
+## 18) FS-106 deployment infrastructure addendum
+
+FS-106 finalizes deployment infrastructure posture for projection-backed control plane and runtime-authoritative execution.
+
+### 18.1 Plane-specific resource model
+
+Deployment infrastructure is split by responsibility:
+
+- DEV control plane resources
+- DEV runtime resources
+- PREPROD runtime resources
+- PROD runtime resources
+
+Runtime resource names are reused across runtime accounts and do not include environment suffixes.
+
+### 18.2 Naming contract
+
+No Lambda or DynamoDB physical names include `DEV`, `PREPROD`, or `PROD` suffixes.
+
+Names distinguish plane/responsibility.
+
+Lambda examples:
+
+- `kbx-integrations-keyra-control-list-deployments`
+- `kbx-integrations-keyra-control-deploy-mapping`
+- `kbx-integrations-keyra-control-promote-deployment`
+- `kbx-integrations-keyra-control-rollback-deployment`
+- `kbx-integrations-keyra-control-reconcile-deployments`
+- `kbx-integrations-keyra-runtime-ingest-artifact`
+- `kbx-integrations-keyra-runtime-activate-artifact`
+- `kbx-integrations-keyra-runtime-rollback-artifact`
+- `kbx-integrations-keyra-runtime-get-operation`
+- `kbx-integrations-keyra-runtime-execute-mapping`
+
+DynamoDB examples:
+
+- `integrations-keyra-deployment-operations`
+- `integrations-keyra-deployment-summaries`
+- `integrations-keyra-deployments`
+- `integrations-keyra-deployment-current`
+- `integrations-keyra-runtime-active-snapshots`
+- `integrations-keyra-runtime-deployment-history`
+- `integrations-keyra-runtime-operation-status`
+
+### 18.3 S3 bucket contract
+
+Required bucket names:
+
+- `kbx-b2b-keyra-dev`
+- `kbx-b2b-keyra-preprod`
+- `kbx-b2b-keyra-prod`
+
+Environment suffix is intentionally present in bucket names.
+
+### 18.4 Cross-account invocation model (selected V1)
+
+Selected model:
+
+1. control-plane orchestrator assumes runtime-environment deploy role,
+2. assumed role calls runtime API Gateway endpoint,
+3. runtime endpoint uses `AWS_IAM` authorization,
+4. SigV4 request signing required,
+5. bounded direct payload push retained,
+6. runtime operation-status and active-pointer endpoints available for reconciliation.
+
+Retained payload cap: 5 MB.
+
+Deferred in FS-106:
+
+- presigned S3 pull,
+- cross-account S3 replication,
+- EventBridge callbacks,
+- PrivateLink,
+- VPC-to-VPC networking.
+
+### 18.5 Required control-plane resources (FS-106)
+
+Control-plane deployment resources include:
+
+- deployment operations persistence,
+- deployment summaries projection table and indexes,
+- aggregate read APIs,
+- mutation APIs,
+- reconciliation scheduler/worker,
+- retention cleanup scheduler/worker,
+- audit/metrics instrumentation.
+
+### 18.6 Required runtime resources (FS-106)
+
+Runtime deployment resources include:
+
+- artifact ingest/activation endpoints,
+- rollback endpoint,
+- runtime operation status endpoint,
+- active pointer store,
+- runtime deployment history store,
+- runtime-local immutable artifact storage,
+- execute endpoint.
+
+### 18.7 Greenfield provisioning posture
+
+FS-106 assumes greenfield provisioning for KeyRa deployment resources in DEV/PREPROD/PROD.
+
+No KeyRa deployment artifact/pointer/history migration from legacy infrastructure is required in this scope.
+
+Non-KeyRa account resources remain unaffected.
+
+### 18.8 Removed-environment executable-path gate
+
+Infrastructure CI validation for removed environments is scoped to executable/configuration paths only (for example `src/`, `ui/src/`, `tests/`, `template.yaml`, `samconfig.toml`, active scripts/config), not unrestricted repository-wide grep over historical docs.

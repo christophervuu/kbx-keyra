@@ -25,6 +25,7 @@ const ORIGINAL_ENV = {
   DEPLOYMENTS_TABLE: getEnvStore().DEPLOYMENTS_TABLE,
   DEPLOYMENT_CURRENT_TABLE: getEnvStore().DEPLOYMENT_CURRENT_TABLE,
   DEPLOYMENT_ORCHESTRATIONS_TABLE: getEnvStore().DEPLOYMENT_ORCHESTRATIONS_TABLE,
+  DEPLOYMENT_SUMMARIES_TABLE: getEnvStore().DEPLOYMENT_SUMMARIES_TABLE,
   AUTO_MAP_TABLE: getEnvStore().AUTO_MAP_TABLE,
   ACTIVE_SNAPSHOTS_TABLE: getEnvStore().ACTIVE_SNAPSHOTS_TABLE,
   DEPLOYMENT_HISTORY_TABLE: getEnvStore().DEPLOYMENT_HISTORY_TABLE,
@@ -68,6 +69,7 @@ describe('persistence config', () => {
     setEnvValue('DEPLOYMENTS_TABLE', ORIGINAL_ENV.DEPLOYMENTS_TABLE);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', ORIGINAL_ENV.DEPLOYMENT_CURRENT_TABLE);
     setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', ORIGINAL_ENV.DEPLOYMENT_ORCHESTRATIONS_TABLE);
+    setEnvValue('DEPLOYMENT_SUMMARIES_TABLE', ORIGINAL_ENV.DEPLOYMENT_SUMMARIES_TABLE);
     setEnvValue('AUTO_MAP_TABLE', ORIGINAL_ENV.AUTO_MAP_TABLE);
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', ORIGINAL_ENV.ACTIVE_SNAPSHOTS_TABLE);
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', ORIGINAL_ENV.DEPLOYMENT_HISTORY_TABLE);
@@ -121,6 +123,7 @@ describe('persistence config', () => {
     setEnvValue('DEPLOYMENTS_TABLE', undefined);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', undefined);
     setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', undefined);
+    setEnvValue('DEPLOYMENT_SUMMARIES_TABLE', undefined);
     setEnvValue('AUTO_MAP_TABLE', undefined);
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', undefined);
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', undefined);
@@ -146,6 +149,7 @@ describe('persistence config', () => {
       deployments: 'keyra-deployments',
       deploymentCurrent: 'keyra-deployment-current',
       deploymentOrchestrations: 'keyra-deployment-orchestrations',
+      deploymentSummaries: 'integrations-keyra-deployment-summaries',
       autoMap: 'keyra-auto-map',
     });
     expect(config.RUNTIME_TABLE_NAMES).toEqual({
@@ -172,6 +176,7 @@ describe('persistence config', () => {
     setEnvValue('DEPLOYMENTS_TABLE', 'deployments-dev');
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', 'deployment-current-dev');
     setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', 'deployment-orchestrations-dev');
+    setEnvValue('DEPLOYMENT_SUMMARIES_TABLE', 'deployment-summaries-dev');
     setEnvValue('AUTO_MAP_TABLE', 'auto-map-dev');
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', 'active-snapshots-dev');
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', 'deployment-history-dev');
@@ -197,6 +202,7 @@ describe('persistence config', () => {
       deployments: 'deployments-dev',
       deploymentCurrent: 'deployment-current-dev',
       deploymentOrchestrations: 'deployment-orchestrations-dev',
+      deploymentSummaries: 'deployment-summaries-dev',
       autoMap: 'auto-map-dev',
     });
     expect(config.RUNTIME_TABLE_NAMES).toEqual({

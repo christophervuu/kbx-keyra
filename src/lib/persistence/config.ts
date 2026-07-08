@@ -24,6 +24,7 @@ export const TABLE_NAMES = {
   deployments: getEnvValueOrDefault('DEPLOYMENTS_TABLE', 'keyra-deployments'),
   deploymentCurrent: getEnvValueOrDefault('DEPLOYMENT_CURRENT_TABLE', 'keyra-deployment-current'),
   deploymentOrchestrations: getEnvValueOrDefault('DEPLOYMENT_ORCHESTRATIONS_TABLE', 'keyra-deployment-orchestrations'),
+  deploymentSummaries: getEnvValueOrDefault('DEPLOYMENT_SUMMARIES_TABLE', 'integrations-keyra-deployment-summaries'),
   autoMap: getEnvValueOrDefault('AUTO_MAP_TABLE', 'keyra-auto-map'),
 } as const;
 

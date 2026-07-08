@@ -143,6 +143,133 @@ export interface CurrentDeployments {
   readonly QA: EnvironmentDeploymentSummary;
 }
 
+export type DeploymentOverviewFreshness = 'NOT_DEPLOYED' | 'CURRENT' | 'STALE';
+
+export type DeploymentOverviewAttentionState = 'OK' | 'NEEDS_ATTENTION';
+
+export type DeploymentOverviewOperationStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'TIMED_OUT';
+
+export type DeploymentOverviewPromotionState =
+  | 'NOT_APPLICABLE'
+  | 'ALIGNED'
+  | 'AVAILABLE'
+  | 'BLOCKED';
+
+export interface DeploymentOverviewEnvironmentState {
+  readonly activeArtifactId: string | null;
+  readonly activeVersion: number | null;
+  readonly freshness: DeploymentOverviewFreshness;
+  readonly lastOperationStatus: DeploymentOverviewOperationStatus | null;
+}
+
+export interface DeploymentOverviewItem {
+  readonly mappingId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly mappingName: string;
+  readonly latestVersion: number;
+  readonly latestVersionCreatedAt: string;
+  readonly promotionState: DeploymentOverviewPromotionState;
+  readonly attentionState: DeploymentOverviewAttentionState;
+  readonly activeOperationId: string | null;
+  readonly lastActivityAt: string;
+  readonly lastActorId: string | null;
+  readonly lastActorDisplayName?: string;
+  readonly updatedAt: string;
+  readonly environments: {
+    readonly DEV: DeploymentOverviewEnvironmentState;
+    readonly PREPROD: DeploymentOverviewEnvironmentState;
+    readonly PROD: DeploymentOverviewEnvironmentState;
+  };
+}
+
+export interface DeploymentOverviewListResponse {
+  readonly projectId?: string;
+  readonly items: readonly DeploymentOverviewItem[];
+  readonly page: {
+    readonly pageSize: number;
+    readonly nextCursor: string | null;
+    readonly returned: number;
+    readonly totalMatched: number;
+  };
+  readonly summary: {
+    readonly failedCount: number;
+    readonly attentionCount: number;
+  };
+}
+
+export interface DeploymentOverviewListOptions {
+  readonly environment?: RuntimeEnvironment;
+  readonly freshness?: DeploymentOverviewFreshness;
+  readonly attentionState?: DeploymentOverviewAttentionState;
+  readonly operationStatus?: DeploymentOverviewOperationStatus;
+  readonly version?: number;
+  readonly search?: string;
+  readonly pageSize?: number;
+  readonly cursor?: string;
+}
+
+export type DeploymentOperationType = 'DEPLOY' | 'PROMOTE' | 'ROLLBACK' | 'RETRY';
+
+export type DeploymentOperationStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'TIMED_OUT';
+
+export type DeploymentOperationStage =
+  | 'VALIDATING_REQUEST'
+  | 'RESOLVING_VERSION'
+  | 'BUILDING_ARTIFACT'
+  | 'VALIDATING_ARTIFACT'
+  | 'TRANSFERRING_ARTIFACT'
+  | 'ACTIVATING_ARTIFACT'
+  | 'VERIFYING_RUNTIME'
+  | 'UPDATING_PROJECTION'
+  | 'FINALIZING';
+
+export interface DeploymentOperationAcceptedResponse {
+  readonly operationId: string;
+  readonly operationType: DeploymentOperationType;
+  readonly status: 'QUEUED';
+  readonly statusUrl: string;
+  readonly requestedAt: string;
+  readonly retryOfOperationId?: string;
+}
+
+export interface DeploymentOperationStatusResponse {
+  readonly operationId: string;
+  readonly mappingId: string;
+  readonly projectId: string | null;
+  readonly operationType: DeploymentOperationType;
+  readonly operationStatus: DeploymentOperationStatus;
+  readonly operationStage: DeploymentOperationStage | null;
+  readonly sourceEnvironment: RuntimeEnvironment | null;
+  readonly targetEnvironment: RuntimeEnvironment | null;
+  readonly sourceVersion: number | null;
+  readonly artifactId: string | null;
+  readonly artifactHash: string | null;
+  readonly requestedBy: {
+    readonly actorType: 'USER' | 'SERVICE' | 'DEVELOPMENT';
+    readonly actorId: string;
+    readonly actorDisplayName?: string;
+    readonly actorEmail?: string;
+  } | null;
+  readonly requestedAt: string;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+  readonly failureCode: string | null;
+  readonly failureMessage: string | null;
+  readonly retryable: boolean | null;
+  readonly retryOfOperationId: string | null;
+}
+
 export type DeploymentMutationEnvironment = RuntimeEnvironment;
 
 export type DeploymentReadEnvironment = RuntimeEnvironment | 'QA';
@@ -332,6 +459,49 @@ export interface ApiAdapter {
     },
   ): Promise<DeploymentRecord[]>;
   getCurrentDeployments(mappingId: string): Promise<CurrentDeployments>;
+  startDeployOperation?(
+    mappingId: string,
+    input: {
+      version: number;
+      targetEnvironment: RuntimeEnvironment;
+      expectedActiveArtifactId: string | null;
+      reason?: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse>;
+  startPromotionOperation?(
+    mappingId: string,
+    input: {
+      sourceEnvironment: RuntimeEnvironment;
+      targetEnvironment: RuntimeEnvironment;
+      expectedSourceArtifactId: string;
+      expectedTargetArtifactId: string | null;
+      reason?: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse>;
+  startRollbackOperation?(
+    mappingId: string,
+    input: {
+      environment: RuntimeEnvironment;
+      targetArtifactId: string;
+      expectedActiveArtifactId: string;
+      reason: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse>;
+  retryDeploymentOperation?(
+    operationId: string,
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse>;
+  getDeploymentOperation?(operationId: string): Promise<DeploymentOperationStatusResponse>;
+  listGlobalDeploymentSummaries?(
+    options?: DeploymentOverviewListOptions,
+  ): Promise<DeploymentOverviewListResponse>;
+  listProjectDeploymentSummaries?(
+    projectId: string,
+    options?: DeploymentOverviewListOptions,
+  ): Promise<DeploymentOverviewListResponse>;
 
   // GitHub: CDM Repo (read-only)
   listCdmSchemas(path?: string): Promise<GitHubFile[]>;

@@ -1,3 +1,15 @@
+import { Sha256 } from '@aws-crypto/sha256-js';
+import {
+  SignatureV4,
+} from '@aws-sdk/signature-v4';
+import {
+  HttpRequest,
+} from '@aws-sdk/protocol-http';
+import {
+  AssumeRoleCommand,
+  STSClient,
+} from '@aws-sdk/client-sts';
+
 import {
   DeploymentEnvironmentConfigError,
   getRuntimeEnvironmentConfig,
@@ -29,6 +41,53 @@ type FetchLike = (input: string, init?: {
     get(name: string): string | null;
   };
 }>;
+
+interface AwsTemporaryCredentials {
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+  readonly sessionToken?: string;
+}
+
+interface AwsRequestCredentialsProvider {
+  getCredentials(config: Awaited<ReturnType<HttpRuntimeApiClient['getEnvConfig']>>): Promise<AwsTemporaryCredentials | null>;
+}
+
+class DefaultAwsRequestCredentialsProvider implements AwsRequestCredentialsProvider {
+  private readonly stsClient: STSClient;
+
+  constructor() {
+    this.stsClient = new STSClient({});
+  }
+
+  async getCredentials(config: Awaited<ReturnType<HttpRuntimeApiClient['getEnvConfig']>>): Promise<AwsTemporaryCredentials | null> {
+    if (config.authMode !== 'AWS_IAM') {
+      return null;
+    }
+
+    if (!config.assumeRoleArn) {
+      throw new DeploymentEnvironmentConfigError(
+        `Runtime environment '${config.key}' requires assumeRoleArn when authMode is AWS_IAM.`,
+      );
+    }
+
+    const assumed = await this.stsClient.send(new AssumeRoleCommand({
+      RoleArn: config.assumeRoleArn,
+      RoleSessionName: `keyra-runtime-api-${config.key.toLowerCase()}-${Date.now()}`,
+      DurationSeconds: 900,
+    }));
+
+    const credentials = assumed.Credentials;
+    if (!credentials?.AccessKeyId || !credentials.SecretAccessKey) {
+      throw new DeploymentEnvironmentConfigError(`AssumeRole did not return usable credentials for '${config.key}'.`);
+    }
+
+    return {
+      accessKeyId: credentials.AccessKeyId,
+      secretAccessKey: credentials.SecretAccessKey,
+      ...(credentials.SessionToken ? { sessionToken: credentials.SessionToken } : {}),
+    };
+  }
+}
 
 interface RuntimeClientRequestBase {
   readonly requestId?: string;
@@ -225,15 +284,18 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
   private readonly fetchImpl: FetchLike;
   private readonly settingsProvider?: DeploymentEnvironmentSettingsProvider;
   private readonly env?: Record<string, string | undefined>;
+  private readonly credentialsProvider: AwsRequestCredentialsProvider;
 
   constructor(options?: {
     readonly fetchImpl?: FetchLike;
     readonly settingsProvider?: DeploymentEnvironmentSettingsProvider;
     readonly env?: Record<string, string | undefined>;
+    readonly credentialsProvider?: AwsRequestCredentialsProvider;
   }) {
     this.fetchImpl = options?.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
     this.settingsProvider = options?.settingsProvider;
     this.env = options?.env;
+    this.credentialsProvider = options?.credentialsProvider ?? new DefaultAwsRequestCredentialsProvider();
   }
 
   async deploy(request: RuntimeDeployRequest): Promise<RuntimeApiResult<RuntimeDeployResponseData>> {
@@ -241,7 +303,7 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
     const requestId = request.requestId ?? getNowRequestId();
 
     return this.postJson<RuntimeDeployResponseData>(
-      config.runtimeApiBaseUrl,
+      config,
       config.deployApiPath,
       request.mappingId,
       {
@@ -266,7 +328,7 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
     const requestId = request.requestId ?? getNowRequestId();
 
     return this.postJson<RuntimeRollbackResponseData>(
-      config.runtimeApiBaseUrl,
+      config,
       config.rollbackApiPath,
       request.mappingId,
       {
@@ -290,7 +352,7 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
     const requestId = request.requestId ?? getNowRequestId();
 
     return this.postJson<RuntimePreviewResponseData>(
-      config.runtimeApiBaseUrl,
+      config,
       config.previewApiPath,
       request.mappingId,
       {
@@ -313,12 +375,11 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
     const url = `${config.runtimeApiBaseUrl}${ensureLeadingSlash(path)}`;
 
     try {
+      const headers = await this.buildRequestHeaders(config, url, 'GET', requestId);
       const response = await withTimeout(config.requestTimeoutMs, (signal) =>
         this.fetchImpl(url, {
           method: 'GET',
-          headers: {
-            'x-request-id': requestId,
-          },
+          headers,
           signal,
         }),
       );
@@ -338,6 +399,17 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
         data,
       };
     } catch (error) {
+      if (error instanceof DeploymentEnvironmentConfigError) {
+        return {
+          ok: false,
+          statusCode: 500,
+          requestId,
+          errorCode: ERROR_CODES.VALIDATION_ERROR,
+          message: `Runtime environment configuration error: ${error.message}`,
+          retryable: false,
+        };
+      }
+
       return timeoutOrServiceFailure(error, requestId);
     }
   }
@@ -352,7 +424,7 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
   }
 
   private async postJson<T>(
-    baseUrl: string,
+    config: Awaited<ReturnType<HttpRuntimeApiClient['getEnvConfig']>>,
     path: string,
     mappingId: string,
     body: Record<string, unknown>,
@@ -360,16 +432,14 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
     requestId: string,
   ): Promise<RuntimeApiResult<T>> {
     const resolvedPath = resolvePathTemplate(path, mappingId);
-    const url = `${baseUrl}${ensureLeadingSlash(resolvedPath)}`;
+    const url = `${config.runtimeApiBaseUrl}${ensureLeadingSlash(resolvedPath)}`;
 
     try {
+      const headers = await this.buildRequestHeaders(config, url, 'POST', requestId, JSON.stringify(body));
       const response = await withTimeout(timeoutMs, (signal) =>
         this.fetchImpl(url, {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-request-id': requestId,
-          },
+          headers,
           body: JSON.stringify(body),
           signal,
         }),
@@ -390,8 +460,69 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
         data,
       };
     } catch (error) {
+      if (error instanceof DeploymentEnvironmentConfigError) {
+        return {
+          ok: false,
+          statusCode: 500,
+          requestId,
+          errorCode: ERROR_CODES.VALIDATION_ERROR,
+          message: `Runtime environment configuration error: ${error.message}`,
+          retryable: false,
+        };
+      }
+
       return timeoutOrServiceFailure(error, requestId);
     }
+  }
+
+  private async buildRequestHeaders(
+    config: Awaited<ReturnType<HttpRuntimeApiClient['getEnvConfig']>>,
+    url: string,
+    method: 'GET' | 'POST',
+    requestId: string,
+    body?: string,
+  ): Promise<Record<string, string>> {
+    const baseHeaders: Record<string, string> = {
+      'x-request-id': requestId,
+    };
+
+    if (method === 'POST') {
+      baseHeaders['content-type'] = 'application/json';
+    }
+
+    if (config.authMode !== 'AWS_IAM') {
+      return baseHeaders;
+    }
+
+    const creds = await this.credentialsProvider.getCredentials(config);
+    if (!creds) {
+      return baseHeaders;
+    }
+
+    const parsed = new URL(url);
+    const signer = new SignatureV4({
+      service: 'execute-api',
+      region: config.runtimeRegion ?? 'us-east-1',
+      credentials: {
+        accessKeyId: creds.accessKeyId,
+        secretAccessKey: creds.secretAccessKey,
+        ...(creds.sessionToken ? { sessionToken: creds.sessionToken } : {}),
+      },
+      sha256: Sha256,
+    });
+
+    const signed = await signer.sign(new HttpRequest({
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      path: `${parsed.pathname}${parsed.search}`,
+      method,
+      headers: baseHeaders,
+      ...(body !== undefined ? { body } : {}),
+    }));
+
+    return Object.fromEntries(
+      Object.entries(signed.headers).map(([key, value]) => [key, String(value)]),
+    );
   }
 }
 

@@ -16,6 +16,7 @@ import {
   get as getDeploymentOrchestration,
   updateStatus as updateDeploymentOrchestrationStatus,
 } from '../../lib/persistence/deployment-orchestrations.js';
+import { upsert as upsertDeploymentSummary } from '../../lib/persistence/deployment-summaries.js';
 import { getConfig as getRevisionConfig } from '../../lib/persistence/mapping-revisions.js';
 import { get as getVersion, getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
 import { validateCdmDeployGuard } from './cdm-deploy-guard.js';
@@ -40,6 +41,7 @@ interface DeployRequest {
 interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId?: string;
+  readonly name?: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
 }
@@ -60,7 +62,7 @@ interface ValueMapProjectLinkItem {
 }
 
 interface MappingConfigLike {
-  readonly rules?: readonly Array<{
+  readonly rules?: ReadonlyArray<{
     readonly valueTableRef?: {
       readonly scope?: string;
       readonly valueTableId?: string;
@@ -377,6 +379,8 @@ function isRevisionDeployDisallowed(environment: DeploymentEnvironment, sourceTy
 
 async function createOrchestrationContext(input: {
   mappingId: string;
+  projectId?: string;
+  mappingName?: string;
   environment: DeploymentEnvironment;
   sourceType: DeploymentSourceType;
   sourceNumber: number;
@@ -412,6 +416,25 @@ async function createOrchestrationContext(input: {
     requestId,
   });
 
+  if (input.projectId && input.mappingName) {
+    await upsertDeploymentSummary({
+      mappingId: input.mappingId,
+      projectId: input.projectId,
+      mappingName: input.mappingName,
+      environmentStates: {
+        [input.environment]: {
+          lastOperationStatus: 'RUNNING',
+        },
+      },
+      operationType: 'DEPLOY',
+      operationStatus: 'RUNNING',
+      activeOperationId: orchestration.orchestrationId,
+      actorId: 'development:system',
+      actorDisplayName: 'Development',
+      occurredAt: requestId ? new Date().toISOString() : undefined,
+    });
+  }
+
   return {
     orchestrationId: orchestration.orchestrationId,
     requestId,
@@ -420,6 +443,8 @@ async function createOrchestrationContext(input: {
 
 async function createOrchestrationOrReplay(input: {
   mappingId: string;
+  projectId?: string;
+  mappingName?: string;
   environment: DeploymentEnvironment;
   sourceType: DeploymentSourceType;
   sourceNumber: number;
@@ -574,6 +599,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         sourceType: 'revision',
         sourceNumber: request.sourceNumber,
         mappingId,
+        projectId: mapping.projectId,
+        mappingName: mapping.name,
         environment: request.environment,
         artifactId: artifact.artifactId,
         idempotencyKey,
@@ -595,6 +622,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           lastErrorMessage: `Payload too large (${payloadCheck.payloadBytes} > ${payloadCheck.limitBytes})`,
         });
 
+        if (mapping.projectId && mapping.name) {
+          await upsertDeploymentSummary({
+            mappingId,
+            projectId: mapping.projectId,
+            mappingName: mapping.name,
+            environmentStates: {
+              [request.environment]: {
+                lastOperationStatus: 'FAILED',
+              },
+            },
+            operationType: 'DEPLOY',
+            operationStatus: 'FAILED',
+            activeOperationId: null,
+            actorId: 'development:system',
+            actorDisplayName: 'Development',
+          });
+        }
+
         return errorResponse(
           ERROR_CODES.PAYLOAD_TOO_LARGE,
           `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce artifact size below the 5MB MVP limit.`,
@@ -613,6 +658,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
       const retryResult = await executeRuntimeOperationWithRetry<void>({
         mappingId,
+        projectId: mapping.projectId,
+        mappingName: mapping.name,
         environment: request.environment,
         operationType: 'deploy',
         orchestrationId: orchestration.orchestrationId,
@@ -648,6 +695,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
 
       if (!retryResult.ok) {
+        if (mapping.projectId && mapping.name) {
+          await upsertDeploymentSummary({
+            mappingId,
+            projectId: mapping.projectId,
+            mappingName: mapping.name,
+            environmentStates: {
+              [request.environment]: {
+                lastOperationStatus: retryResult.finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+              },
+            },
+            operationType: 'DEPLOY',
+            operationStatus: retryResult.finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+            activeOperationId: null,
+            actorId: 'development:system',
+            actorDisplayName: 'Development',
+          });
+        }
+
         return errorResponse(
           retryResult.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
           retryResult.message,
@@ -684,6 +749,29 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         artifactId: artifact.artifactId,
         requestId: retryResult.requestId,
       });
+
+      if (mapping.projectId && mapping.name) {
+        await upsertDeploymentSummary({
+          mappingId,
+          projectId: mapping.projectId,
+          mappingName: mapping.name,
+          latestVersion: request.sourceNumber,
+          latestVersionCreatedAt: undefined,
+          environmentStates: {
+            [request.environment]: {
+              activeArtifactId: created.artifactId ?? null,
+              activeVersion: created.sourceType === 'version' ? created.sourceNumber : null,
+              freshness: 'CURRENT',
+              lastOperationStatus: 'SUCCEEDED',
+            },
+          },
+          operationType: 'DEPLOY',
+          operationStatus: 'SUCCEEDED',
+          activeOperationId: null,
+          actorId: 'development:system',
+          actorDisplayName: 'Development',
+        });
+      }
 
       return jsonResponse(201, {
         ...created,
@@ -755,6 +843,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       sourceType: 'version',
       sourceNumber: version.version,
       mappingId,
+      projectId: mapping.projectId,
+      mappingName: mapping.name,
       environment: request.environment,
       artifactId: artifact.artifactId,
       idempotencyKey,
@@ -776,6 +866,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         lastErrorMessage: `Payload too large (${payloadCheck.payloadBytes} > ${payloadCheck.limitBytes})`,
       });
 
+      if (mapping.projectId && mapping.name) {
+        await upsertDeploymentSummary({
+          mappingId,
+          projectId: mapping.projectId,
+          mappingName: mapping.name,
+          environmentStates: {
+            [request.environment]: {
+              lastOperationStatus: 'FAILED',
+            },
+          },
+          operationType: 'DEPLOY',
+          operationStatus: 'FAILED',
+          activeOperationId: null,
+          actorId: 'development:system',
+          actorDisplayName: 'Development',
+        });
+      }
+
       return errorResponse(
         ERROR_CODES.PAYLOAD_TOO_LARGE,
         `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce artifact size below the 5MB MVP limit.`,
@@ -794,6 +902,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const retryResult = await executeRuntimeOperationWithRetry<void>({
       mappingId,
+      projectId: mapping.projectId,
+      mappingName: mapping.name,
       environment: request.environment,
       operationType: 'deploy',
       orchestrationId: orchestration.orchestrationId,
@@ -829,6 +939,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     if (!retryResult.ok) {
+      if (mapping.projectId && mapping.name) {
+        await upsertDeploymentSummary({
+          mappingId,
+          projectId: mapping.projectId,
+          mappingName: mapping.name,
+          environmentStates: {
+            [request.environment]: {
+              lastOperationStatus: retryResult.finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+            },
+          },
+          operationType: 'DEPLOY',
+          operationStatus: retryResult.finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+          activeOperationId: null,
+          actorId: 'development:system',
+          actorDisplayName: 'Development',
+        });
+      }
+
       return errorResponse(
         retryResult.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
         retryResult.message,
@@ -865,6 +993,29 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       artifactId: artifact.artifactId,
       requestId: retryResult.requestId,
     });
+
+    if (mapping.projectId && mapping.name) {
+      await upsertDeploymentSummary({
+        mappingId,
+        projectId: mapping.projectId,
+        mappingName: mapping.name,
+      latestVersion: version.version,
+        latestVersionCreatedAt: new Date().toISOString(),
+        environmentStates: {
+          [request.environment]: {
+            activeArtifactId: created.artifactId ?? null,
+            activeVersion: created.sourceType === 'version' ? created.sourceNumber : null,
+            freshness: 'CURRENT',
+            lastOperationStatus: 'SUCCEEDED',
+          },
+        },
+        operationType: 'DEPLOY',
+        operationStatus: 'SUCCEEDED',
+        activeOperationId: null,
+        actorId: 'development:system',
+        actorDisplayName: 'Development',
+      });
+    }
 
     return jsonResponse(201, {
       ...created,

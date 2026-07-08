@@ -589,3 +589,147 @@ Promote and rollback continue to operate on exact artifact identity:
 
 Historical deployment artifacts must be backfilled/migrated to immutable schema-version reference bundles with parity guarantees so pre-existing deployments remain behaviorally unchanged.
 
+---
+
+## 24) FS-106 deployment projection, authority, and lifecycle addendum
+
+FS-106 supersedes SANDBOX-era deployment interaction contracts for active implementation paths. Legacy SANDBOX/QA references in this document are historical context only and are not valid for new executable contracts.
+
+### 24.1 Canonical runtime environments
+
+Active deployment environments are:
+
+- `DEV`
+- `PREPROD`
+- `PROD`
+
+`SANDBOX`, `QA`, and `STAGING` are not accepted in new executable deployment contracts.
+
+### 24.2 Runtime vs control-plane authority
+
+Runtime authority (per runtime account):
+
+- local immutable artifact bytes,
+- active artifact pointer,
+- runtime deployment history,
+- runtime operation status,
+- actual mapping execution behavior.
+
+Control-plane authority (DEV account):
+
+- mapping version eligibility resolution,
+- deployment operation orchestration,
+- aggregate deployment summaries projection,
+- user-facing aggregate deployment read APIs,
+- audit and reconciliation coordination.
+
+The runtime active pointer is the source of truth for what executes. Control-plane projection data is eventually consistent and read-only for UX purposes.
+
+### 24.3 Deployment summary projection (required)
+
+FS-106 requires a control-plane projection table for global/project deployment listings:
+
+- table: `integrations-keyra-deployment-summaries`
+- required indexes:
+  - `GlobalActivityIndex` (`globalPartition`, `lastActivityAt`)
+  - `ProjectActivityIndex` (`projectId`, `lastActivityAt`)
+  - `AttentionIndex` (`attentionState`, `lastActivityAt`)
+
+Projection rows include per-environment active artifact/version/freshness and last-operation metadata plus cross-environment summary fields (`promotionState`, `attentionState`, `activeOperationId`, `lastActivityAt`, actor metadata).
+
+Projection updates are triggered by:
+
+- mapping creation,
+- mapping version creation,
+- deploy/promote/rollback acceptance and terminal outcomes,
+- retry acceptance and terminal outcomes,
+- mapping archival/deletion,
+- reconciliation repairs.
+
+If projection update fails after runtime activation succeeds, reconciliation must repair projection state using runtime authority and mark mismatch metrics/audit.
+
+### 24.4 Separated state dimensions
+
+FS-106 canonical state model separates concerns:
+
+- `operationType`: `DEPLOY | PROMOTE | ROLLBACK | RETRY`
+- `operationStatus`: `QUEUED | RUNNING | SUCCEEDED | FAILED | TIMED_OUT`
+- `operationStage`:
+  - `VALIDATING_REQUEST`
+  - `RESOLVING_VERSION`
+  - `BUILDING_ARTIFACT`
+  - `VALIDATING_ARTIFACT`
+  - `TRANSFERRING_ARTIFACT`
+  - `ACTIVATING_ARTIFACT`
+  - `VERIFYING_RUNTIME`
+  - `UPDATING_PROJECTION`
+  - `FINALIZING`
+- `deploymentFreshness` per environment: `NOT_DEPLOYED | CURRENT | STALE`
+- `promotionState`: `NOT_APPLICABLE | ALIGNED | AVAILABLE | BLOCKED`
+- deployment-history activation reason: `DEPLOY | PROMOTE | ROLLBACK`
+
+`ROLLED_BACK` is not a freshness state.
+
+### 24.5 Version-only deployment contract
+
+- DEV deploy accepts immutable mapping version only.
+- PREPROD/PROD are promotion-only.
+- Revision-backed deployment is removed from new public contracts.
+- Deployment history references mapping version, not draft revision.
+
+### 24.6 Immutable artifact bundle contract
+
+FS-106 V1 artifact model is self-contained bundle content.
+
+Identity rules:
+
+- `artifactHash` is computed from canonical serialized bundle bytes.
+- deployment metadata (environment/actor/reason/time) is excluded from hash input.
+- `artifactId` is content-addressed from hash or permanently bound to that hash.
+- identical `artifactId` must never refer to different bytes.
+- promotion preserves bytes/hash/identity unchanged.
+- rollback never rebuilds artifact.
+
+### 24.7 Reconciliation requirements
+
+Reconciliation is mandatory when:
+
+- runtime activation succeeds but control-plane call times out,
+- operation is stuck/ambiguous (`RUNNING`/`TIMED_OUT` without terminal convergence),
+- projection is stale or failed to update.
+
+Control-plane reconciliation must query runtime operation/pointer endpoints and repair operation + projection state. Scheduled reconciliation is required.
+
+### 24.8 Retention cleanup requirements
+
+FS-106 retention is enforced by scheduled cleanup workflow (Lambda/Step Functions), not S3 lifecycle count rules.
+
+Policy:
+
+- DEV keep last 20 successful activations per mapping
+- PREPROD keep last 20
+- PROD keep last 50
+
+Artifact deletion protection conditions:
+
+- currently active in that environment,
+- referenced by in-progress operation,
+- inside rollback retention window,
+- required as active source for allowed promotion.
+
+Environment-local copy nuance:
+
+- cleanup may remove obsolete DEV local artifact copy even when same artifact identity remains active in PROD local runtime.
+
+### 24.9 Selected cross-account invocation model
+
+FS-106 V1 selection:
+
+1. control-plane orchestrator assumes environment-specific runtime deployment role,
+2. assumed role calls runtime API Gateway endpoint,
+3. runtime API uses `AWS_IAM` auth,
+4. requests are SigV4 signed,
+5. artifact transfer remains bounded direct payload push,
+6. runtime exposes operation-status and active-pointer endpoints for reconciliation.
+
+Payload cap remains 5 MB in V1.

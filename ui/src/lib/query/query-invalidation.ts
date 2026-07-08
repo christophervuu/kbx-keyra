@@ -26,6 +26,10 @@ export const queryInvalidationKeys = {
   deployments: {
     family: queryKeys.deployments.family,
     summaryList: queryKeys.deployments.summaries,
+    globalOverviewList: queryKeys.deployments.globalOverviews,
+    globalOverview: queryKeys.deployments.globalOverview,
+    projectOverviewList: queryKeys.deployments.projectOverviews,
+    projectOverview: queryKeys.deployments.projectOverview,
     contextList: queryKeys.deployments.contexts,
     historyList: queryKeys.deployments.histories,
     context: queryKeys.deployments.context,

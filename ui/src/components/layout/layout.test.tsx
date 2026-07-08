@@ -46,6 +46,7 @@ function renderNavBar(path = '/') {
       <NavBar />
       <Routes>
         <Route path="/" element={<div data-testid="page-home" />} />
+        <Route path="/deployments" element={<div data-testid="page-deployments" />} />
         <Route path="/value-mappings" element={<div data-testid="page-value-mappings" />} />
         <Route path="/schemas" element={<div data-testid="page-schemas" />} />
         <Route path="/templates" element={<div data-testid="page-templates" />} />
@@ -69,6 +70,7 @@ function renderBreadcrumbs(path: string) {
             }
           >
             <Route path="/" element={<div />} />
+            <Route path="/deployments" element={<div />} />
             <Route path="/projects/:projectId" element={<div />} />
             <Route path="/projects/:projectId/mappings/:mappingId" element={<div />} />
             <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div />} />
@@ -224,6 +226,7 @@ describe('NavBar', () => {
     renderNavBar();
 
     expect(screen.getByTestId('sidebar-link-home')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-deployments')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-link-value mappings')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-link-schemas')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-link-templates')).toBeInTheDocument();
@@ -301,6 +304,14 @@ describe('Breadcrumbs', () => {
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
     expect(screen.getByText('Schemas')).toBeInTheDocument();
+  });
+
+  it('renders breadcrumbs for /deployments', () => {
+    renderBreadcrumbs('/deployments');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByText('Deployments')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Deployments' })).not.toBeInTheDocument();
   });
 
   it('renders breadcrumbs for /value-mappings/:valueMapId', () => {

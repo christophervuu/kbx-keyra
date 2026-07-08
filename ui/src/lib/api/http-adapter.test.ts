@@ -1280,6 +1280,76 @@ describe('HttpAdapter (CRUD)', () => {
     expect(result.PROD.status).toBe('not-deployed');
   });
 
+  it('listGlobalDeploymentSummaries maps to GET /deployments with filters', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      items: [],
+      page: { pageSize: 25, nextCursor: null, returned: 0, totalMatched: 0 },
+      summary: { failedCount: 0, attentionCount: 0 },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listGlobalDeploymentSummaries({
+      attentionState: 'NEEDS_ATTENTION',
+      environment: 'DEV',
+      freshness: 'STALE',
+      operationStatus: 'FAILED',
+      search: 'project map',
+      version: 4,
+      pageSize: 25,
+      cursor: 'cursor-1',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/deployments?environment=DEV&freshness=STALE&attentionState=NEEDS_ATTENTION&operationStatus=FAILED&version=4&search=project+map&pageSize=25&cursor=cursor-1',
+      method: 'GET',
+    });
+  });
+
+  it('listGlobalDeploymentSummaries trims empty search values from query params', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      items: [],
+      page: { pageSize: 50, nextCursor: null, returned: 0, totalMatched: 0 },
+      summary: { failedCount: 0, attentionCount: 0 },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listGlobalDeploymentSummaries({
+      search: '   ',
+      pageSize: 50,
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/deployments?pageSize=50',
+      method: 'GET',
+    });
+  });
+
+  it('listProjectDeploymentSummaries maps to GET /projects/:projectId/deployments', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      projectId: 'p-1',
+      items: [],
+      page: { pageSize: 50, nextCursor: null, returned: 0, totalMatched: 0 },
+      summary: { failedCount: 0, attentionCount: 0 },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listProjectDeploymentSummaries('p-1', {
+      attentionState: 'NEEDS_ATTENTION',
+      pageSize: 50,
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/deployments?attentionState=NEEDS_ATTENTION&pageSize=50',
+      method: 'GET',
+    });
+  });
+
   it('listCdmSchemas maps to GET /schemas/cdm', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce([]);
     const adapter = new HttpAdapter(API_URL);

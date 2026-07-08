@@ -61,6 +61,13 @@ const orchestrationPersistenceMocks = vi.hoisted(() => ({
   get: vi.fn(),
 }));
 
+const deploymentSummariesMocks = vi.hoisted(() => ({
+  upsert: vi.fn(),
+  listGlobal: vi.fn(),
+  listByProject: vi.fn(),
+  listByAttention: vi.fn(),
+}));
+
 const revisionMocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
 }));
@@ -100,6 +107,7 @@ const engineMocks = vi.hoisted(() => ({
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
 vi.mock('../../../src/lib/persistence/deployments.js', () => deploymentPersistenceMocks);
 vi.mock('../../../src/lib/persistence/deployment-orchestrations.js', () => orchestrationPersistenceMocks);
+vi.mock('../../../src/lib/persistence/deployment-summaries.js', () => deploymentSummariesMocks);
 vi.mock('../../../src/lib/persistence/mapping-revisions.js', () => revisionMocks);
 vi.mock('../../../src/lib/persistence/mapping-versions.js', () => versionMocks);
 vi.mock('../../../src/lambda/deployment/runtime-relay.js', () => ({
@@ -129,7 +137,15 @@ async function importRollbackHandler() {
 }
 
 async function importListHandler() {
+  return import('../../../src/lambda/deployment/list-mapping-deployments.js');
+}
+
+async function importGlobalListHandler() {
   return import('../../../src/lambda/deployment/list-deployments.js');
+}
+
+async function importProjectListHandler() {
+  return import('../../../src/lambda/deployment/list-project-deployments.js');
 }
 
 async function importCurrentHandler() {
@@ -179,7 +195,7 @@ describe('deployment handlers', () => {
     sharedMocks.parseBody.mockReset().mockReturnValue({});
     sharedMocks.parseQueryParam.mockReset().mockImplementation((event, name: string) => event.queryStringParameters?.[name] ?? null);
     sharedMocks.generateRequestId.mockReset().mockReturnValue('req-123');
-    sharedMocks.getItem.mockReset().mockResolvedValue({ mappingId: 'map-1' });
+    sharedMocks.getItem.mockReset().mockResolvedValue({ mappingId: 'map-1', projectId: 'proj-1', name: 'Map 1' });
     sharedMocks.getObject.mockReset().mockResolvedValue(
       JSON.stringify({
         mappingConfig: {
@@ -261,6 +277,10 @@ describe('deployment handlers', () => {
     });
     orchestrationPersistenceMocks.updateStatus.mockReset().mockResolvedValue(undefined);
     orchestrationPersistenceMocks.get.mockReset().mockResolvedValue(null);
+    deploymentSummariesMocks.upsert.mockReset().mockResolvedValue(undefined);
+    deploymentSummariesMocks.listGlobal.mockReset().mockResolvedValue([]);
+    deploymentSummariesMocks.listByProject.mockReset().mockResolvedValue([]);
+    deploymentSummariesMocks.listByAttention.mockReset().mockResolvedValue([]);
 
     runtimeRelayMocks.buildRuntimeDeployArtifact.mockReset().mockResolvedValue({
       artifactId: 'artifact-1',
@@ -272,6 +292,22 @@ describe('deployment handlers', () => {
       sourceConfigHash: 'abc',
       engineVersion: '1.0.0',
       mappingConfig: { id: 'config' },
+      bundleFormatVersion: 1,
+      manifest: {
+        artifactId: 'artifact-1',
+        artifactHash: 'abc',
+        mappingId: 'map-1',
+        mappingVersion: 3,
+        engineVersion: '1.0.0',
+        dslVersion: '1',
+        bundleFormatVersion: 1,
+        sourceSchemaRefs: [],
+        targetSchemaRef: null,
+        enrichmentSchemaRefs: [],
+        valueMapRefs: [],
+        constantsHash: 'const-hash',
+        compiledDslHash: 'dsl-hash',
+      },
     });
     runtimeRelayMocks.assertArtifactPayloadWithinLimit.mockReset().mockReturnValue({
       ok: true,
@@ -350,6 +386,7 @@ describe('deployment handlers', () => {
     expect(orchestrationPersistenceMocks.updateStatus).toHaveBeenCalledWith(
       expect.objectContaining({ orchestrationId: 'orc-1', status: 'succeeded', attemptCount: 1 }),
     );
+    expect(deploymentSummariesMocks.upsert).toHaveBeenCalled();
     expect(deploymentPersistenceMocks.create).toHaveBeenCalledWith(
       expect.objectContaining({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 }),
     );
@@ -783,6 +820,7 @@ describe('deployment handlers', () => {
       }),
     );
     expect(retryMocks.executeRuntimeOperationWithRetry).toHaveBeenCalled();
+    expect(deploymentSummariesMocks.upsert).toHaveBeenCalled();
   });
 
   it('promote handler replays idempotent request when prior orchestration already succeeded', async () => {
@@ -1146,6 +1184,7 @@ describe('deployment handlers', () => {
     expect(orchestrationPersistenceMocks.updateStatus).toHaveBeenCalledWith(
       expect.objectContaining({ orchestrationId: 'orc-1', status: 'succeeded', attemptCount: 1 }),
     );
+    expect(deploymentSummariesMocks.upsert).toHaveBeenCalled();
     expect(deploymentPersistenceMocks.createRollback).toHaveBeenCalledWith(
       expect.objectContaining({
         environment: 'PROD',
@@ -1519,6 +1558,269 @@ describe('deployment handlers', () => {
     const { handler } = await importListHandler();
 
     const result = await handler({ body: null, pathParameters: { mappingId: 'map-1' }, queryStringParameters: { environment: 'SANDBOX' } });
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('global list handler returns paged aggregate deployment summaries with deterministic ordering', async () => {
+    deploymentSummariesMocks.listGlobal.mockResolvedValueOnce([
+      {
+        mappingId: 'm-2',
+        globalPartition: 'GLOBAL',
+        projectId: 'p-1',
+        projectName: 'Project B',
+        mappingName: 'Map B',
+        latestVersion: 2,
+        latestVersionCreatedAt: '2026-07-07T00:00:00.000Z',
+        devActiveArtifactId: 'a-2',
+        devActiveVersion: 2,
+        devFreshness: 'CURRENT',
+        devLastOperationStatus: 'SUCCEEDED',
+        preprodActiveArtifactId: null,
+        preprodActiveVersion: null,
+        preprodFreshness: 'NOT_DEPLOYED',
+        preprodLastOperationStatus: null,
+        prodActiveArtifactId: null,
+        prodActiveVersion: null,
+        prodFreshness: 'NOT_DEPLOYED',
+        prodLastOperationStatus: null,
+        promotionState: 'AVAILABLE',
+        attentionState: 'OK',
+        activeOperationId: null,
+        lastActivityAt: '2026-07-07T10:00:00.000Z',
+        lastActorId: 'actor-1',
+        updatedAt: '2026-07-07T10:00:00.000Z',
+      },
+      {
+        mappingId: 'm-1',
+        globalPartition: 'GLOBAL',
+        projectId: 'p-1',
+        projectName: 'Project A',
+        mappingName: 'Map A',
+        latestVersion: 1,
+        latestVersionCreatedAt: '2026-07-07T00:00:00.000Z',
+        devActiveArtifactId: null,
+        devActiveVersion: null,
+        devFreshness: 'NOT_DEPLOYED',
+        devLastOperationStatus: null,
+        preprodActiveArtifactId: null,
+        preprodActiveVersion: null,
+        preprodFreshness: 'NOT_DEPLOYED',
+        preprodLastOperationStatus: null,
+        prodActiveArtifactId: null,
+        prodActiveVersion: null,
+        prodFreshness: 'NOT_DEPLOYED',
+        prodLastOperationStatus: null,
+        promotionState: 'NOT_APPLICABLE',
+        attentionState: 'OK',
+        activeOperationId: null,
+        lastActivityAt: '2026-07-07T10:00:00.000Z',
+        lastActorId: 'actor-2',
+        updatedAt: '2026-07-07T10:00:00.000Z',
+      },
+    ]);
+    const { handler } = await importGlobalListHandler();
+
+    const result = await handler({
+      body: null,
+      queryStringParameters: { pageSize: '1' },
+    });
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body) as {
+      items: Array<{ mappingId: string }>;
+      page: { returned: number; pageSize: number; nextCursor: string | null };
+      summary: { failedCount: number; attentionCount: number };
+    };
+
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.mappingId).toBe('m-1');
+    expect(body.page.returned).toBe(1);
+    expect(body.page.pageSize).toBe(1);
+    expect(typeof body.page.nextCursor).toBe('string');
+    expect(body.summary.failedCount).toBe(0);
+    expect(body.summary.attentionCount).toBe(0);
+  });
+
+  it('global list handler filters by attention via AttentionIndex and supports cursor pagination', async () => {
+    const attentionRows = [
+      {
+        mappingId: 'm-attn-2',
+        globalPartition: 'GLOBAL',
+        projectId: 'p-2',
+        projectName: 'Project Z',
+        mappingName: 'Map 2',
+        latestVersion: 8,
+        latestVersionCreatedAt: '2026-07-07T00:00:00.000Z',
+        devActiveArtifactId: 'a',
+        devActiveVersion: 8,
+        devFreshness: 'CURRENT',
+        devLastOperationStatus: 'FAILED',
+        preprodActiveArtifactId: null,
+        preprodActiveVersion: null,
+        preprodFreshness: 'NOT_DEPLOYED',
+        preprodLastOperationStatus: null,
+        prodActiveArtifactId: null,
+        prodActiveVersion: null,
+        prodFreshness: 'NOT_DEPLOYED',
+        prodLastOperationStatus: null,
+        promotionState: 'AVAILABLE',
+        attentionState: 'NEEDS_ATTENTION',
+        activeOperationId: null,
+        lastActivityAt: '2026-07-07T11:00:00.000Z',
+        lastActorId: 'actor-1',
+        updatedAt: '2026-07-07T11:00:00.000Z',
+      },
+      {
+        mappingId: 'm-attn-1',
+        globalPartition: 'GLOBAL',
+        projectId: 'p-2',
+        projectName: 'Project A',
+        mappingName: 'Map 1',
+        latestVersion: 8,
+        latestVersionCreatedAt: '2026-07-07T00:00:00.000Z',
+        devActiveArtifactId: 'a',
+        devActiveVersion: 8,
+        devFreshness: 'CURRENT',
+        devLastOperationStatus: 'TIMED_OUT',
+        preprodActiveArtifactId: null,
+        preprodActiveVersion: null,
+        preprodFreshness: 'NOT_DEPLOYED',
+        preprodLastOperationStatus: null,
+        prodActiveArtifactId: null,
+        prodActiveVersion: null,
+        prodFreshness: 'NOT_DEPLOYED',
+        prodLastOperationStatus: null,
+        promotionState: 'AVAILABLE',
+        attentionState: 'NEEDS_ATTENTION',
+        activeOperationId: null,
+        lastActivityAt: '2026-07-07T11:00:00.000Z',
+        lastActorId: 'actor-1',
+        updatedAt: '2026-07-07T11:00:00.000Z',
+      },
+    ];
+    deploymentSummariesMocks.listByAttention.mockResolvedValueOnce(attentionRows);
+    const { handler } = await importGlobalListHandler();
+
+    const page1 = await handler({
+      body: null,
+      queryStringParameters: { attentionState: 'NEEDS_ATTENTION', pageSize: '1' },
+    });
+
+    expect(page1.statusCode).toBe(200);
+    const page1Body = JSON.parse(page1.body) as {
+      items: Array<{ mappingId: string }>;
+      page: { nextCursor: string | null };
+      summary: { failedCount: number; attentionCount: number };
+    };
+    expect(deploymentSummariesMocks.listByAttention).toHaveBeenCalledWith('NEEDS_ATTENTION');
+    expect(page1Body.items[0]?.mappingId).toBe('m-attn-1');
+    expect(page1Body.summary.failedCount).toBe(2);
+    expect(page1Body.summary.attentionCount).toBe(2);
+    expect(typeof page1Body.page.nextCursor).toBe('string');
+
+    deploymentSummariesMocks.listByAttention.mockResolvedValueOnce(attentionRows);
+
+    const page2 = await handler({
+      body: null,
+      queryStringParameters: {
+        attentionState: 'NEEDS_ATTENTION',
+        pageSize: '1',
+        cursor: page1Body.page.nextCursor ?? undefined,
+      },
+    });
+
+    expect(page2.statusCode).toBe(200);
+    const page2Body = JSON.parse(page2.body) as { items: Array<{ mappingId: string }> };
+    expect(page2Body.items[0]?.mappingId).toBe('m-attn-2');
+  });
+
+  it('project list handler scopes to project and applies environment freshness filter', async () => {
+    deploymentSummariesMocks.listByProject.mockResolvedValueOnce([
+      {
+        mappingId: 'm-1',
+        globalPartition: 'GLOBAL',
+        projectId: 'proj-1',
+        projectName: 'Project 1',
+        mappingName: 'Map 1',
+        latestVersion: 5,
+        latestVersionCreatedAt: '2026-07-07T00:00:00.000Z',
+        devActiveArtifactId: 'a-dev',
+        devActiveVersion: 4,
+        devFreshness: 'STALE',
+        devLastOperationStatus: 'SUCCEEDED',
+        preprodActiveArtifactId: null,
+        preprodActiveVersion: null,
+        preprodFreshness: 'NOT_DEPLOYED',
+        preprodLastOperationStatus: null,
+        prodActiveArtifactId: null,
+        prodActiveVersion: null,
+        prodFreshness: 'NOT_DEPLOYED',
+        prodLastOperationStatus: null,
+        promotionState: 'AVAILABLE',
+        attentionState: 'OK',
+        activeOperationId: null,
+        lastActivityAt: '2026-07-07T10:00:00.000Z',
+        lastActorId: 'actor-1',
+        updatedAt: '2026-07-07T10:00:00.000Z',
+      },
+      {
+        mappingId: 'm-2',
+        globalPartition: 'GLOBAL',
+        projectId: 'proj-1',
+        projectName: 'Project 1',
+        mappingName: 'Map 2',
+        latestVersion: 5,
+        latestVersionCreatedAt: '2026-07-07T00:00:00.000Z',
+        devActiveArtifactId: 'a-dev-2',
+        devActiveVersion: 5,
+        devFreshness: 'CURRENT',
+        devLastOperationStatus: 'SUCCEEDED',
+        preprodActiveArtifactId: null,
+        preprodActiveVersion: null,
+        preprodFreshness: 'NOT_DEPLOYED',
+        preprodLastOperationStatus: null,
+        prodActiveArtifactId: null,
+        prodActiveVersion: null,
+        prodFreshness: 'NOT_DEPLOYED',
+        prodLastOperationStatus: null,
+        promotionState: 'AVAILABLE',
+        attentionState: 'OK',
+        activeOperationId: null,
+        lastActivityAt: '2026-07-07T09:00:00.000Z',
+        lastActorId: 'actor-1',
+        updatedAt: '2026-07-07T09:00:00.000Z',
+      },
+    ]);
+    const { handler } = await importProjectListHandler();
+
+    const result = await handler({
+      body: null,
+      pathParameters: { projectId: 'proj-1' },
+      queryStringParameters: { environment: 'DEV', freshness: 'STALE' },
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(deploymentSummariesMocks.listByProject).toHaveBeenCalledWith('proj-1');
+    const body = JSON.parse(result.body) as {
+      projectId: string;
+      items: Array<{ mappingId: string }>;
+    };
+    expect(body.projectId).toBe('proj-1');
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.mappingId).toBe('m-1');
+  });
+
+  it('project list handler validates cursor binding to active filters', async () => {
+    deploymentSummariesMocks.listByProject.mockResolvedValueOnce([]);
+    const { handler } = await importProjectListHandler();
+
+    const result = await handler({
+      body: null,
+      pathParameters: { projectId: 'proj-1' },
+      queryStringParameters: { cursor: encodeURIComponent(JSON.stringify({ o: 1, fh: 'other', sv: 1 })) },
+    });
 
     expect(result.statusCode).toBe(400);
     expect(JSON.parse(result.body).error.code).toBe('VALIDATION_ERROR');

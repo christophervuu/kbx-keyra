@@ -10,6 +10,10 @@ import type {
   CurrentDeployment,
   CurrentDeployments,
   DeploymentMutationEnvironment,
+  DeploymentOperationAcceptedResponse,
+  DeploymentOperationStatusResponse,
+  DeploymentOverviewListOptions,
+  DeploymentOverviewListResponse,
   DeploymentReadEnvironment,
   DeploymentRecord,
   DeploymentSourceType,
@@ -184,6 +188,49 @@ function normalizeRunSummary(
     ...(payload.counts ? { counts: payload.counts } : {}),
     ...(payload.failure ? { failure: payload.failure } : {}),
   };
+}
+
+function buildDeploymentOverviewQuery(options?: DeploymentOverviewListOptions): string {
+  if (!options) {
+    return '';
+  }
+
+  const params = new URLSearchParams();
+
+  if (options.environment) {
+    params.set('environment', options.environment);
+  }
+
+  if (options.freshness) {
+    params.set('freshness', options.freshness);
+  }
+
+  if (options.attentionState) {
+    params.set('attentionState', options.attentionState);
+  }
+
+  if (options.operationStatus) {
+    params.set('operationStatus', options.operationStatus);
+  }
+
+  if (typeof options.version === 'number') {
+    params.set('version', String(options.version));
+  }
+
+  if (typeof options.search === 'string' && options.search.trim().length > 0) {
+    params.set('search', options.search.trim());
+  }
+
+  if (typeof options.pageSize === 'number') {
+    params.set('pageSize', String(options.pageSize));
+  }
+
+  if (typeof options.cursor === 'string' && options.cursor.trim().length > 0) {
+    params.set('cursor', options.cursor);
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : '';
 }
 
 function toAutoMapScope(input: AutoMapSectionInput): AutoMapRunSummary['scope'] {
@@ -737,6 +784,114 @@ export class HttpAdapter extends LocalStorageAdapter {
         status: computeStatus(preprodDeployment, stalenessInput),
       },
     };
+  }
+
+  override async startDeployOperation(
+    mappingId: string,
+    input: {
+      version: number;
+      targetEnvironment: DeploymentMutationEnvironment;
+      expectedActiveArtifactId: string | null;
+      reason?: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    return httpRequest<DeploymentOperationAcceptedResponse>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/deployments`,
+      method: 'POST',
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: input,
+    });
+  }
+
+  override async startPromotionOperation(
+    mappingId: string,
+    input: {
+      sourceEnvironment: DeploymentMutationEnvironment;
+      targetEnvironment: DeploymentMutationEnvironment;
+      expectedSourceArtifactId: string;
+      expectedTargetArtifactId: string | null;
+      reason?: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    return httpRequest<DeploymentOperationAcceptedResponse>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/promotions`,
+      method: 'POST',
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: input,
+    });
+  }
+
+  override async startRollbackOperation(
+    mappingId: string,
+    input: {
+      environment: DeploymentMutationEnvironment;
+      targetArtifactId: string;
+      expectedActiveArtifactId: string;
+      reason: string;
+    },
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    return httpRequest<DeploymentOperationAcceptedResponse>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/rollbacks`,
+      method: 'POST',
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: input,
+    });
+  }
+
+  override async retryDeploymentOperation(
+    operationId: string,
+    idempotencyKey: string,
+  ): Promise<DeploymentOperationAcceptedResponse> {
+    return httpRequest<DeploymentOperationAcceptedResponse>({
+      baseUrl: this.apiUrl,
+      path: `/deployment-operations/${encodeURIComponent(operationId)}/retry`,
+      method: 'POST',
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: {},
+    });
+  }
+
+  override async getDeploymentOperation(operationId: string): Promise<DeploymentOperationStatusResponse> {
+    return httpRequest<DeploymentOperationStatusResponse>({
+      baseUrl: this.apiUrl,
+      path: `/deployment-operations/${encodeURIComponent(operationId)}`,
+      method: 'GET',
+    });
+  }
+
+  override async listGlobalDeploymentSummaries(
+    options?: DeploymentOverviewListOptions,
+  ): Promise<DeploymentOverviewListResponse> {
+    return httpRequest<DeploymentOverviewListResponse>({
+      baseUrl: this.apiUrl,
+      path: `/deployments${buildDeploymentOverviewQuery(options)}`,
+      method: 'GET',
+    });
+  }
+
+  override async listProjectDeploymentSummaries(
+    projectId: string,
+    options?: DeploymentOverviewListOptions,
+  ): Promise<DeploymentOverviewListResponse> {
+    return httpRequest<DeploymentOverviewListResponse>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/deployments${buildDeploymentOverviewQuery(options)}`,
+      method: 'GET',
+    });
   }
 
   override async listCdmSchemas(path?: string): Promise<GitHubFile[]> {

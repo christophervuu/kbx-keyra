@@ -74,4 +74,89 @@ describe('persistence deployment-orchestrations', () => {
 
     expect(put.input.ConditionExpression).toBe('attribute_not_exists(orchestrationId)');
   });
+
+  it('acquireOperationLock returns conflict when active lock exists', async () => {
+    dynamoSendMock
+      .mockResolvedValueOnce({
+        Item: {
+          orchestrationId: 'lock:map-1:DEV',
+          mappingId: 'map-1',
+          targetEnvironment: 'DEV',
+          lockOwnerOperationId: 'op-existing',
+          expiresAt: Math.floor(Date.now() / 1000) + 120,
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      })
+      .mockRejectedValueOnce(Object.assign(new Error('conditional failed'), { name: 'ConditionalCheckFailedException' }))
+      .mockResolvedValueOnce({
+        Item: {
+          orchestrationId: 'lock:map-1:DEV',
+          mappingId: 'map-1',
+          targetEnvironment: 'DEV',
+          lockOwnerOperationId: 'op-existing',
+          expiresAt: Math.floor(Date.now() / 1000) + 120,
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      });
+
+    const mod = await importModule();
+    const result = await mod.acquireOperationLock({
+      mappingId: 'map-1',
+      targetEnvironment: 'DEV',
+      ownerOperationId: 'op-new',
+      ttlSeconds: 300,
+    });
+
+    expect(result.outcome).toBe('conflict');
+    expect(result.existingLockOwnerOperationId).toBe('op-existing');
+  });
+
+  it('acquireOperationLock acquires when existing lock is expired', async () => {
+    dynamoSendMock
+      .mockResolvedValueOnce({
+        Item: {
+          orchestrationId: 'lock:map-1:DEV',
+          mappingId: 'map-1',
+          targetEnvironment: 'DEV',
+          lockOwnerOperationId: 'op-old',
+          expiresAt: Math.floor(Date.now() / 1000) - 10,
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      })
+      .mockResolvedValueOnce({});
+
+    const mod = await importModule();
+    const result = await mod.acquireOperationLock({
+      mappingId: 'map-1',
+      targetEnvironment: 'DEV',
+      ownerOperationId: 'op-new',
+      ttlSeconds: 300,
+    });
+
+    expect(result.outcome).toBe('acquired');
+    const put = dynamoSendMock.mock.calls[1]?.[0] as {
+      input: {
+        ConditionExpression?: string;
+      };
+    };
+    expect(put.input.ConditionExpression).toContain('expiresAt < :nowEpoch');
+  });
+
+  it('listReconciliationCandidates scans running/timed-out operations only', async () => {
+    dynamoSendMock.mockResolvedValueOnce({
+      Items: [
+        { operationId: 'op-2', operationStatus: 'TIMED_OUT', requestedAt: '2026-07-07T00:00:02.000Z' },
+        { operationId: 'op-1', operationStatus: 'RUNNING', requestedAt: '2026-07-07T00:00:01.000Z' },
+      ],
+    });
+
+    const mod = await importModule();
+    const items = await mod.listReconciliationCandidates();
+
+    expect(items.map((item) => item.operationId)).toEqual(['op-1', 'op-2']);
+    const scan = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: { FilterExpression?: string };
+    };
+    expect(scan.input.FilterExpression).toContain('#status');
+  });
 });

@@ -14,7 +14,14 @@ const sharedMocks = vi.hoisted(() => ({
   ERROR_CODES: { VALIDATION_ERROR: 'VALIDATION_ERROR' },
 }));
 
+const deploymentSummariesMocks = vi.hoisted(() => ({
+  remove: vi.fn(),
+}));
+
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
+vi.mock('../../../src/lib/persistence/deployment-summaries.js', () => ({
+  remove: deploymentSummariesMocks.remove,
+}));
 
 async function importHandler() {
   return import('../../../src/lambda/mapping/delete-mapping.js');
@@ -45,6 +52,7 @@ describe('delete-mapping handler', () => {
     sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.deleteItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.deleteObject.mockReset().mockResolvedValue(undefined);
+    deploymentSummariesMocks.remove.mockReset().mockResolvedValue(undefined);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
     sharedMocks.notFound.mockReset().mockReturnValue({ code: 'RESOURCE_NOT_FOUND', message: "Mapping with id 'map-1' not found", statusCode: 404, retryable: false });
@@ -60,6 +68,7 @@ describe('delete-mapping handler', () => {
     expect(sharedMocks.query).toHaveBeenCalledTimes(1);
     expect(sharedMocks.updateItem).toHaveBeenCalledTimes(1);
     expect(sharedMocks.deleteObject).toHaveBeenCalledTimes(1);
+    expect(deploymentSummariesMocks.remove).toHaveBeenCalledWith('map-1');
   });
 
   it('missing mapping returns 404', async () => {

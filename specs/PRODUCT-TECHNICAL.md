@@ -1,8 +1,8 @@
 # KeyRa 2.0 — Product & Technical Specification
 
-**Version:** 1.0
-**Date:** 2026-04-23
-**Status:** Draft
+**Version:** 1.1
+**Date:** 2026-07-07
+**Status:** Updated (FS-106 Rev 2 alignment)
 **Owner:** KeyRa Product Team
 
 ---
@@ -51,7 +51,7 @@ The application provides:
 - A **portable mapping engine** — a pure TypeScript library that runs identically in the browser and in AWS Lambda. Users preview transformations instantly in the browser, and can optionally execute against the server-side engine to validate production parity.
 - An **AI-assisted suggestion pipeline** backed by GitHub Models that can auto-generate mapping rules, translate natural language into DSL expressions, explain rules in plain English, and suggest fixes for errors.
 - A **schema lifecycle platform** with KeyRa-managed user schema draft/revision/version management and CDM GitHub read-only ingestion.
-- An **environment-based deployment workflow** (DEV → QA → PROD) with immutable snapshots, version history, and rollback capability. Deployed mapping configurations are consumed at runtime by a generic Lambda function orchestrated through AWS Step Functions — no code changes required to update transformation logic.
+- An **environment-based deployment workflow** (DEV → PREPROD → PROD) with immutable artifacts, operation-status polling, projection-backed overviews, and rollback capability. Deployed mapping configurations are consumed at runtime by a generic Lambda function — no code changes required to update transformation logic.
 
 The frontend is a React/TypeScript/Vite application deployed on AWS Amplify. The backend is a serverless AWS stack (API Gateway, Lambda, DynamoDB, S3, Step Functions) that handles persistence, AI orchestration, schema ingestion/retrieval, and deployment management.
 
@@ -114,7 +114,7 @@ This persona covers any team member who authors mappings — business analysts, 
 - **G2:** Support schemas ranging from a handful of fields to 23,000+ fields without degraded UX or AI accuracy.
 - **G3:** Provide a client-side preview/test loop that executes in under 2 seconds with zero backend dependency.
 - **G4:** Provide an optional server-side preview that executes against the production mapping engine, giving users confidence that their mapping will work in the actual runtime environment.
-- **G5:** Enable environment-based deployment (DEV → QA → PROD) with full audit trail and rollback capability.
+- **G5:** Enable environment-based deployment (DEV → PREPROD → PROD) with full audit trail and rollback capability.
 - **G6:** Provide safe schema lifecycle management with immutable versioning for user-owned schemas in KeyRa, while keeping CDM GitHub integration read-only.
 - **G7:** Provide AI-assisted mapping features that surface as reviewable suggestions — never auto-committed.
 - **G8:** Make mappings debuggable through diagnostics with stable error codes, precise rule locations, and plain-language messages.
@@ -183,7 +183,8 @@ SUPPORTING SCREENS (accessible from global navigation)
 /projects/new                                    → Create project wizard
 /projects/:projectId                             → Project Overview
 /projects/:projectId/settings                    → Project Settings
-/projects/:projectId/deployments                 → Project Deployment Dashboard
+/deployments                                     → Global Deployment Overview
+/projects/:projectId/deployments                 → Project Deployment Overview
 /projects/:projectId/mappings/new                → Create mapping (select schemas)
 /projects/:projectId/mappings/:mappingId         → Mapping Editor / Studio
 /projects/:projectId/mappings/:mappingId/deploy  → Mapping Deployment Page
@@ -199,7 +200,7 @@ SUPPORTING SCREENS (accessible from global navigation)
 2. **Deploy is deliberate.** There is no deploy action in the Mapping Editor. Deployment lives on its own dedicated page, accessible from the Project Overview or via a read-only link in the editor.
 3. **Save ≠ Deploy.** Saving a mapping persists changes. Deploying creates an immutable snapshot and pushes it to an environment. These are separate, intentional actions.
 4. **Schemas are a project concern.** Schema management (linking, uploading, syncing) lives on the Project Overview, not inside the Mapping Editor.
-5. **Two levels of deployment visibility.** The Project Deployment Dashboard shows status across all mappings in a project. The Mapping Deployment Page provides the detailed diff, history, and actions for a single mapping.
+5. **Three deployment surfaces with one action surface.** Global (`/deployments`) and project (`/projects/:projectId/deployments`) pages are overview + drill-down only. The Mapping Deployment Page provides detailed context and is the only mutating deployment surface.
 6. **Schema availability and ownership.** CDM schemas are shared read-only assets. User-owned schemas are KeyRa-managed schema families; mappings select immutable versions explicitly and are never auto-upgraded.
 7. **Settings inherit.** Project-level settings override global defaults. Mappings within a project inherit the project's settings unless explicitly overridden at the mapping level.
 
@@ -217,11 +218,11 @@ SUPPORTING SCREENS (accessible from global navigation)
 
 | Section                 | Content                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Data Source                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
-| **Overview metrics**    | Total projects. Total mappings. Total global schemas. Mappings by deploy status (N in DEV, N in QA, N in PROD). Recent warnings/errors.                                                                                                                                                                                                                                                                                                                                        | `GET /projects` (aggregated)    |
+| **Overview metrics**    | Total projects. Total mappings. Total global schemas. Mappings by deploy status (N in DEV, N in PREPROD, N in PROD). Recent warnings/errors.                                                                                                                                                                                                                                                                                                                                   | `GET /projects` (aggregated)    |
 | **Project list** (tab)  | Searchable, sortable table or card grid. Columns: name, description, source schema, target schema, mapping count, last modified, deploy status summary badges. A primary "Create Project" action button in the section header. Each project row/card has actions: Edit (→ Project Overview), Delete.                                                                                                                                                                           | `GET /projects`                 |
-| **Deployments** (tab)   | Flat table of all deployments across all projects. Columns: project, mapping, DEV/QA/PROD status badges + version, last deployed timestamp, status (current / stale / not deployed), action (link → Mapping Deployment Page). Searchable and filterable by project, environment, and status. Sortable by last deployed date (default: most recent first). Stale mappings visually highlighted. Read-only — no deploy actions. See Section 6.4.1 for full column specification. | `GET /deployments` (aggregated) |
+| **Deployments** (navigation destination)   | Global deployment overview page (`/deployments`): one row per mapping, including never deployed. Columns: project, mapping, DEV/PREPROD/PROD status badges + version/freshness, last activity timestamp, action (link → Mapping Deployment Page). Searchable and filterable by project, environment, freshness, attention state, and operation status. Default sort: last activity desc. Read-only — no deploy actions. | `GET /deployments` (projection-backed) |
 | **Schema Library link** | Prominent navigation link (not a tab) to the Schema Library (`/schemas`). Displayed alongside or above the tabs. Shows total available schema count (CDM + user-owned).                                                                                                                                                                                                                                                                                                         | Navigation only                 |
-| **Activity feed**       | Chronological feed: "Mapping X deployed to QA", "Schema Y version created", "Project Z created". Filterable by: All, My Projects, CDM Updates. CDM schema updates display with a 📚 badge. If a CDM update affects a schema used in one of the user's projects, it is flagged with higher priority (e.g., "⚠ CDM schema updated — 3 projects use this schema").                                                                                                             | `GET /activity`                 |
+| **Activity feed**       | Chronological feed: "Mapping X deployed to PREPROD", "Schema Y version created", "Project Z created". Filterable by: All, My Projects, CDM Updates. CDM schema updates display with a 📚 badge. If a CDM update affects a schema used in one of the user's projects, it is flagged with higher priority (e.g., "⚠ CDM schema updated — 3 projects use this schema").                                                                                                          | `GET /activity`                 |
 
 #### Deploy Status Badge
 
@@ -334,7 +335,7 @@ A primary "Create Mapping" action button in the section header.
 | Coverage | Percentage of required target fields that have a mapping rule |
 | Status | Draft / Ready / Has Errors |
 | DEV | Read-only deploy status badge (●/○/◐) with deployed version number |
-| QA | Read-only deploy status badge |
+| PREPROD | Read-only deploy status badge |
 | PROD | Read-only deploy status badge |
 | Last Modified | Timestamp |
 | Updated By | User who last modified |
@@ -346,7 +347,7 @@ Deploy status badges on the mapping list are **read-only indicators**. The "Depl
 
 - **Create Mapping:** Opens mapping creation wizard (select source + target schema, name the mapping).
 - **Add Schema:** Opens the three-option schema picker described in Section B.
-- **Open Deployments:** Navigates to the Project Deployment Dashboard (`/projects/:projectId/deployments`).
+- **Open Deployments:** Navigates to the Project Deployment Overview (`/projects/:projectId/deployments`).
 - **Duplicate Project:** Creates a copy of the project with all its mappings and schema links.
 - **Export Project:** Bundles all mapping configs, schema references, and test cases into a `.keyra` file.
 - **Import Mapping:** Upload a mapping config file to add to this project.
@@ -364,7 +365,7 @@ Deploy status badges on the mapping list are **read-only indicators**. The "Depl
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  {Mapping Name}  v{N} ({saved / unsaved changes})    DEV ● QA ○ PROD ○ │
+│  {Mapping Name}  v{N} ({saved / unsaved changes})    DEV ● PREPROD ○ PROD ○ │
 │  {Source Schema} → {Target Schema}                                      │
 │  ℹ️ {Informational message if deployed version is stale}                │
 │  [Go to Deploy Page]                                                     │
@@ -406,7 +407,7 @@ The editor is composed of panels. The exact layout (side-by-side, tabbed, or hyb
 - Source data input: paste JSON/XML, upload a file, or load a saved test case.
 - Format auto-detection (JSON vs XML).
 - **Client-side preview:** "Preview" button runs the mapping engine `execute()` in-browser against the current working config (including unsaved changes). Output appears alongside source. This is the default fast path — zero backend dependency, < 2 seconds.
-- **Server-side preview (optional):** "Run on Server" action with an environment selector (DEV / QA / PROD). Only environments with an active deployment are selectable. The backend retrieves the active snapshot for the selected environment, executes the mapping engine, and returns the transformed output + diagnostics. Output is labeled with the environment and snapshot version (e.g., "Output from QA (v5, deployed 2026-04-20)"). This lets users answer: "What would this payload look like if it went through the mapping currently deployed in QA?" — without deploying or modifying anything.
+- **Server-side preview (optional):** "Run on Server" action with an environment selector (DEV / PREPROD / PROD). Only environments with an active deployment are selectable. The backend retrieves the active snapshot for the selected environment, executes the mapping engine, and returns the transformed output + diagnostics. Output is labeled with the environment and snapshot version (e.g., "Output from PREPROD (v5, deployed 2026-04-20)"). This lets users answer: "What would this payload look like if it went through the mapping currently deployed in PREPROD?" — without deploying or modifying anything.
 - Diff view: highlights matches, mismatches, missing fields, extra fields between actual output and expected output (if provided).
 - Diagnostics panel: shows engine warnings, errors, and traces. Each diagnostic links to the rule that produced it.
 - Test case management: save input + expected output as named test cases. Run all test cases, show pass/fail summary.
@@ -465,7 +466,7 @@ Deployment visibility exists at three levels. Actions (deploy, promote, rollback
 | Project | Project name |
 | Mapping | Mapping name |
 | DEV | Deploy status badge + version |
-| QA | Deploy status badge + version |
+| PREPROD | Deploy status badge + version |
 | PROD | Deploy status badge + version |
 | Last Deployed | Timestamp of most recent deployment (any environment) |
 | Status | Current / Stale / Not deployed |
@@ -476,7 +477,7 @@ Deployment visibility exists at three levels. Actions (deploy, promote, rollback
 - Read-only — no deploy actions. Clicking a row navigates to the Mapping Deployment Page.
 - Stale mappings are visually highlighted to draw attention.
 
-#### 6.4.2 Project Deployment Dashboard
+#### 6.4.2 Project Deployment Overview
 
 **Purpose:** Deployment status of all mappings within a single project. Helps users answer "what's deployed in this project, and is anything out of date?"
 
@@ -493,7 +494,7 @@ Deployment visibility exists at three levels. Actions (deploy, promote, rollback
 | Mapping | Mapping name |
 | Latest Version | Most recent saved version number |
 | DEV | Deploy status badge + deployed version |
-| QA | Deploy status badge + deployed version |
+| PREPROD | Deploy status badge + deployed version |
 | PROD | Deploy status badge + deployed version |
 | Last Deployed | Timestamp |
 | Deployed By | User who last deployed (any environment) |
@@ -536,13 +537,13 @@ A table showing the current state of each environment:
 
 | Column | Content |
 |--------|---------|
-| Environment | DEV / QA / PROD |
+| Environment | DEV / PREPROD / PROD |
 | Deployed Version | Version number currently active in this environment, or "Not deployed" |
 | Deployed At | Timestamp |
 | Deployed By | User |
 | Status | Current (matches latest) / Stale (N versions behind) / Not deployed |
 
-Below the table, a plain-language summary: "Latest: v7. DEV is 2 versions behind. QA and PROD are 4 versions behind."
+Below the table, a plain-language summary: "Latest: v7. DEV is 2 versions behind. PREPROD and PROD are 4 versions behind."
 
 ##### Section C: What's Changing (Diff)
 
@@ -559,8 +560,8 @@ Contextual diff that answers "what exactly will change if I deploy?"
 | Action | Availability | Behavior |
 |--------|-------------|----------|
 | **Deploy to DEV** | Always available (if no validation errors and dependencies are deployable) | Creates a snapshot of current mapping + immutable schema refs + engine version. Deploys to DEV. |
-| **Promote DEV → QA** | Available when DEV has a deployed version newer than QA | Takes the exact snapshot from DEV and makes it active in QA. Does not create a new snapshot — reuses the same artifact. |
-| **Promote QA → PROD** | Available when QA has a deployed version newer than PROD | Takes the exact snapshot from QA and makes it active in PROD. Future: requires approval. |
+| **Promote DEV → PREPROD** | Available when DEV has a deployed version newer than PREPROD | Takes the exact snapshot from DEV and makes it active in PREPROD. Does not create a new snapshot — reuses the same artifact. |
+| **Promote PREPROD → PROD** | Available when PREPROD has a deployed version newer than PROD | Takes the exact snapshot from PREPROD and makes it active in PROD. PROD promotion requires explicit reason. |
 
 Every deploy/promote action triggers a confirmation modal:
 
@@ -589,7 +590,7 @@ Chronological list of all deployments for this mapping, filterable by environmen
 | Column | Content |
 |--------|---------|
 | Version | Version number deployed |
-| Environment | DEV / QA / PROD |
+| Environment | DEV / PREPROD / PROD |
 | Deployed At | Timestamp |
 | Deployed By | User |
 | Status | Active / Superseded / Rolled back |
@@ -773,7 +774,7 @@ Actions depend on origin and status:
 | Section                 | Content                                                                                                                                  |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **Backend connection**  | API base URL. Connection status indicator.                                                                                               |
-| **Environment URLs**    | DEV mapping Lambda URL. QA mapping Lambda URL. PROD mapping Lambda URL. Used for server-side preview. Connection status per environment. |
+| **Environment URLs**    | DEV mapping Lambda URL. PREPROD mapping Lambda URL. PROD mapping Lambda URL. Used for server-side preview. Connection status per environment. |
 | **GitHub connection**   | CDM repo path. Non-CDM repo path. Connection status.                                                                                     |
 | **AI configuration**    | Model preferences (if overridable). No API keys stored in the UI — keys are backend environment variables.                               |
 | **Display preferences** | Theme (future), default preview format (JSON/XML), editor font size.                                                                     |
@@ -843,7 +844,7 @@ This section defines what the UI owns versus what the backend owns. The boundary
 | **Persistent storage** | Save/load projects, mappings, schemas to/from DynamoDB + S3 via API calls. |
 | **Schema retrieval** | Fetch schemas, mappings, project metadata, and templates from the backend. |
 | **Schema ingestion** | Upload a schema to the backend for parsing into tree nodes, embedding, and indexing. |
-| **Server-side preview & testing** | Execute sample data against a deployed mapping in a specific environment by invoking that environment's generic mapping Lambda directly. The user selects an environment (DEV / QA / PROD) and provides sample source data. KeyRa's backend calls the target environment's URL with the `mappingId` + `sourceData`. The environment's Lambda retrieves its own active snapshot and executes the mapping engine — the exact same code path that production traffic follows. Returns the transformed output + diagnostics. This lets users answer: "What would this payload look like if it went through the mapping currently deployed in QA?" — without deploying or modifying anything. |
+| **Server-side preview & testing** | Execute sample data against a deployed mapping in a specific environment by invoking that environment's generic mapping Lambda directly. The user selects an environment (DEV / PREPROD / PROD) and provides sample source data. KeyRa's backend calls the target environment's URL with the `mappingId` + `sourceData`. The environment's Lambda retrieves its own active snapshot and executes the mapping engine — the exact same code path that production traffic follows. Returns the transformed output + diagnostics. This lets users answer: "What would this payload look like if it went through the mapping currently deployed in PREPROD?" — without deploying or modifying anything. |
 | **AI features** | All AI calls go through API Gateway → Lambda → GitHub Models. The UI never calls GitHub Models directly. Includes: auto-map, NL → DSL, explain rule, smart fix, AI validation, and AI-assisted field descriptions. |
 | **Deployment** | Deploy, promote, and rollback actions call the backend to create/manage immutable snapshots and write them to target environment resources. |
 | **GitHub operations** | CDM-only file listing/link/re-sync operations. Non-CDM user-schema publish/sync-to-GitHub is retired from canonical flows. |
@@ -856,15 +857,15 @@ The Mapping Editor offers two preview modes. Both are accessible from Panel 5 (P
 | Mode | What it runs | Where it runs | Data source | When to use |
 |------|-------------|---------------|-------------|-------------|
 | **Client-side preview** | The mapping engine in-browser against the **current working config** (including unsaved changes). | Browser | Current editor state | Fast iteration during authoring. Default mode. < 2 seconds. |
-| **Server-side preview** | The **actual environment's generic mapping Lambda** — the same Lambda that production traffic hits. | Target environment's infrastructure | Active snapshot in DEV / QA / PROD | Validating that a specific environment produces the expected output. Verifying parity between what's deployed and what you expect. Debugging production issues with real payloads. |
+| **Server-side preview** | The **actual environment's generic mapping Lambda** — the same Lambda that production traffic hits. | Target environment's infrastructure | Active snapshot in DEV / PREPROD / PROD | Validating that a specific environment produces the expected output. Verifying parity between what's deployed and what you expect. Debugging production issues with real payloads. |
 
 **Server-side preview UX:**
 1. User clicks "Run on Server" in the Preview & Testing panel.
-2. An environment selector appears: DEV / QA / PROD (only environments with an active deployment are selectable).
+2. An environment selector appears: DEV / PREPROD / PROD (only environments with an active deployment are selectable).
 3. User provides sample source data (paste, upload, or load test case).
 4. KeyRa's backend invokes the selected environment's generic mapping Lambda URL with `{ mappingId, sourceData }`. This is the exact same code path that production Step Functions use.
 5. Output appears alongside the source data, with the same diff and diagnostics views as client-side preview.
-6. A label indicates which environment and snapshot version produced the output: "Output from QA (v5, deployed 2026-04-20)."
+6. A label indicates which environment and snapshot version produced the output: "Output from PREPROD (v5, deployed 2026-04-20)."
 
 **Key distinction:** Client-side preview tests what you're *building*. Server-side preview tests what's *deployed* — by calling the actual production infrastructure. They may produce different results if the working config has diverged from the deployed snapshot.
 
@@ -879,7 +880,7 @@ The Mapping Editor offers two preview modes. Both are accessible from Panel 5 (P
 - **AI suggestions are never auto-committed.** Every AI output must be explicitly accepted by the user before becoming a real mapping rule or schema description.
 - **The mapping engine has zero cloud dependencies.** It is a pure TypeScript library that knows nothing about UI, APIs, storage, or AI. It runs identically in the browser and in Lambda.
 - **Save ≠ Deploy.** These are always separate actions. No implicit deployment on save.
-- **Schema edits require explicit sync.** Editing a schema does not automatically push changes to GitHub. The user must explicitly sync after editing.
+- **Schema lifecycle actions are explicit.** Editing a schema does not automatically create immutable versions or update mapping pins. CDM re-sync remains explicit and user-owned schema lifecycle is KeyRa-native.
 
 ---
 
@@ -961,7 +962,7 @@ interface ApiAdapter {
   previewOnServer(mappingId: string, input: ServerPreviewInput): Promise<ServerPreviewResult>;
 
 interface ServerPreviewInput {
-  environment: Environment;        // "DEV" | "QA" | "PROD"
+  environment: Environment;        // "DEV" | "PREPROD" | "PROD"
   sourceData: Record<string, any>; // Sample payload
 }
 
@@ -1214,149 +1215,78 @@ FS-105 does not change DSL expression grammar. It changes mapping configuration 
 
 | Concept | Definition |
 |---------|-----------|
-| **Version** | An auto-incrementing integer assigned to a mapping config each time it is saved. BAs see "v1", "v2", "v3". |
-| **Snapshot** | An immutable artifact created at deploy time. Contains: full mapping config (DSL rules), immutable schema references (`schemaId`, `schemaVersion`, `schemaVersionId`, `contentHash`, artifact refs), engine version, and creation timestamp. Snapshots are never modified after creation. Stored in S3. |
-| **Environment** | One of: `DEV`, `QA`, `PROD`. Each environment has an "active snapshot" pointer. |
-| **Deploy** | Create a snapshot from the latest saved mapping config and make it the active snapshot in a target environment. |
-| **Promote** | Copy an existing snapshot from one environment to another. The same artifact runs in both — no re-generation. |
-| **Rollback** | Change an environment's active snapshot pointer back to a previously deployed snapshot. No data is deleted. |
-| **Stale** | A mapping has been saved (new version created) since the last deploy to a given environment. The deployed version is behind the latest. |
+| **Version** | An explicit immutable mapping version selected for DEV deployment (`v1`, `v2`, `v3` …). |
+| **Artifact** | Immutable deployment bundle identity (`artifactId` + `artifactHash`) produced from canonical bundle bytes. Includes mapping config + immutable dependency/runtime metadata. |
+| **Environment** | One of: `DEV`, `PREPROD`, `PROD`. Each runtime environment has an active artifact pointer. |
+| **Deploy** | Start async DEV deployment from selected immutable mapping version. |
+| **Promote** | Start async promotion of the currently active artifact (`DEV → PREPROD`, `PREPROD → PROD`) with no artifact rebuild. |
+| **Rollback** | Start async rollback to a retained eligible historical artifact in a target environment. |
+| **Operation** | Async deployment control-plane lifecycle record (`operationId`) with separated `operationType`, `operationStatus`, and `operationStage`. |
+| **Freshness** | Read-model freshness state per environment: `NOT_DEPLOYED`, `CURRENT`, `STALE`. Distinct from operation failure state. |
 
-### 12.2 Deployment Flow
+### 12.2 Runtime and control-plane authority
 
-```
-BA clicks "Deploy to DEV" on the Deployment Page
-       │
-       ▼
-Confirmation modal (Section 6.4, Section D)
-       │
-       ▼ (BA confirms)
-UI calls POST /mappings/:id/deploy { environment: "DEV" }
-       │
-       ▼
-Lambda: deployMapping
-  1. Read current mapping config from storage.
-  2. Read current immutable schema refs (`schemaId`, `schemaVersion`, `schemaVersionId`, `contentHash`).
-  3. Bundle into an immutable snapshot JSON.
-  4. Write snapshot to S3.
-  5. Write deployment record to DynamoDB (Deployments table).
-  6. Update "active snapshot" pointer for DEV.
-  7. Return DeploymentRecord.
-       │
-       ▼
-UI updates deploy badges and deployment history.
-```
+- **Runtime authority (execution truth):** active artifact pointer, runtime-local artifacts/history, runtime operation outcome.
+- **Control-plane authority (orchestration/read model):** operation coordination, global/project deployment summaries, reconciliation/repair workflows.
+- Runtime active pointer is authoritative for execution behavior; projection rows are eventually consistent UX read models.
 
-### 12.3 Promotion Flow
+### 12.3 Canonical mutation + operation API model
 
-```
-BA clicks "Promote DEV → QA"
-       │
-       ▼
-Confirmation modal
-       │
-       ▼ (BA confirms)
-UI calls POST /mappings/:id/promote { from: "DEV", to: "QA" }
-       │
-       ▼
-Lambda: promoteDeploy
-  1. Read the snapshot currently active in DEV.
-  2. Set that same snapshot as the active snapshot for QA.
-  3. Write a new deployment record for QA.
-  4. Return DeploymentRecord.
-       │
-       ▼
-QA now runs the exact same artifact as DEV.
-```
+All mutation endpoints are async and return `202 Accepted` with operation envelope. `Idempotency-Key` is required.
 
-### 12.4 Production Execution
+| Endpoint | Purpose |
+|---|---|
+| `POST /mappings/:id/deployments` | Start DEV deploy operation (version-only) |
+| `POST /mappings/:id/promotions` | Start promotion operation |
+| `POST /mappings/:id/rollbacks` | Start rollback operation |
+| `POST /deployment-operations/:id/retry` | Start retry operation linked by `retryOfOperationId` |
+| `GET /deployment-operations/:id` | Poll operation status/stage/outcome |
 
-At runtime, when a Step Function step requires data transformation:
+UI behavior contract:
 
-1. The Step Function invokes the **generic mapping Lambda** with: `{ mappingId, sourceData }`
-2. The Lambda reads the active snapshot key from its environment's ActiveSnapshots table (`PK: mappingId`).
-3. The Lambda fetches the snapshot from its environment's S3 bucket.
-4. The Lambda resolves schema refs from the snapshot → fetches schema content from its environment's S3.
-5. The Lambda runs the KeyRa mapping engine with the snapshot's config + resolved schemas + source data.
-6. The Lambda returns the transformed output.
+- Poll by `operationId`.
+- Persist active operation reference and resume polling after refresh/navigation.
+- Distinguish operation outcome from freshness summary.
 
-**No environment parameter is needed.** The Lambda is deployed within a specific environment and only has access to that environment's DynamoDB and S3. Environment isolation is handled by infrastructure (separate URLs, separate resources), not by application logic.
+### 12.4 Promotion, rollback, and reason policy
 
-### 12.5 Production Integration Model
+- Deployment path is `DEV → PREPROD → PROD`.
+- PREPROD/PROD are promotion-only targets.
+- Promotion reuses exact artifact identity/bytes/hash.
+- Rollback is pointer-based to retained eligible artifact.
 
-#### Architecture
+Reason requirements:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  AWS Step Function (business workflow) — e.g., QA env       │
-│                                                              │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │ Step A    │───▶│ Step B:      │───▶│ Step C           │   │
-│  │ (receive  │    │ Transform    │    │ (deliver to      │   │
-│  │  payload) │    │ Data         │    │  target system)  │   │
-│  └──────────┘    └──────┬───────┘    └──────────────────┘   │
-│                         │                                    │
-└─────────────────────────┼────────────────────────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │ Generic Mapping Lambda │
-              │ (deployed in QA)      │
-              │                       │
-              │ 1. Receive:           │
-              │    - mappingId        │
-              │    - sourceData       │
-              │                       │
-              │ 2. Read active        │
-              │    snapshot from      │
-              │    QA's DynamoDB/S3   │
-              │                       │
-              │ 3. Resolve schemas    │
-              │    from QA's S3       │
-              │                       │
-              │ 4. Execute KeyRa      │
-              │    mapping engine     │
-              │                       │
-              │ 5. Return             │
-              │    transformed output │
-              └───────────────────────┘
-```
+- DEV deployment: optional
+- DEV → PREPROD promotion: optional
+- PREPROD → PROD promotion: required
+- Rollback (all environments): required
+- Retry: optional
 
-#### Key Properties
+### 12.5 Projection-backed overview surfaces
 
-| Property | Detail |
-|----------|--------|
-| **The Lambda is generic** | Contains no domain logic. One Lambda function serves all mappings within its environment. |
-| **The Lambda is environment-unaware** | It doesn't know it's "in QA." It simply reads from the DynamoDB table and S3 bucket configured in its environment variables. Infrastructure handles isolation. |
-| **Each environment is a different URL** | DEV, QA, and PROD each have their own API Gateway endpoint / Lambda ARN. Selecting an environment means calling a different URL. |
-| **The engine is identical** | Same `@keyra/engine` library runs in the browser (preview) and in this Lambda (production). |
-| **Step Functions don't change when mappings change** | The state machine only knows it needs to call the mapping Lambda with a `mappingId`. When a user deploys a new version, the ActiveSnapshots table is updated — the next execution picks it up automatically. |
-| **Rollback is instant** | Rolling back changes the snapshot pointer in the environment's DynamoDB. The next execution uses the previous snapshot. No Lambda redeployment needed. |
+- Global route: `/deployments` (read-only overview + drill-down)
+- Project route: `/projects/:projectId/deployments` (read-only overview + drill-down)
+- Mapping route: `/projects/:projectId/mappings/:mappingId/deploy` (only mutating surface)
 
-#### Per-Environment Infrastructure
+Overview surfaces read from projection-backed summaries and support full-population filter/sort/pagination semantics.
 
-Each environment maintains its own isolated deployment:
+### 12.6 Reconciliation and retention contracts
 
-| Resource | Purpose |
-|----------|---------|
-| **API Gateway endpoint** | Environment-specific URL for invoking the generic mapping Lambda |
-| **Generic Mapping Lambda** | Reads from its own DynamoDB/S3. Executes the engine. Returns output. |
-| **ActiveSnapshots DynamoDB table** | Maps `mappingId` → active `snapshotS3Key`. Single item per mapping. |
-| **Snapshots S3 bucket (or prefix)** | Stores immutable snapshot JSON files. |
-| **Schema content S3 (or prefix)** | Stores resolved schema content referenced by snapshots. |
+Reconciliation:
 
-#### How KeyRa Writes to Environments
+- Required for timeout/partial-failure/projection-mismatch outcomes.
+- Control plane reconciles runtime authority to operation + projection state.
+- Target: projection/runtime mismatch reconciled within 5 minutes.
 
-The KeyRa application backend has cross-environment write access to deploy snapshots:
+Retention cleanup:
 
-| KeyRa Action | What it writes | Where |
-|-------------|----------------|-------|
-| **Deploy to DEV** | Snapshot JSON + schema content + ActiveSnapshots pointer | DEV's S3 + DEV's DynamoDB |
-| **Promote DEV → QA** | Copies snapshot JSON + schema content + writes ActiveSnapshots pointer | QA's S3 + QA's DynamoDB |
-| **Promote QA → PROD** | Copies snapshot JSON + schema content + writes ActiveSnapshots pointer | PROD's S3 + PROD's DynamoDB |
-| **Rollback in PROD** | Updates ActiveSnapshots pointer to previous snapshot | PROD's DynamoDB |
-
-Cross-environment access is handled via IAM roles — the KeyRa deploy Lambda assumes a role with write permissions to the target environment's resources.
+- Scheduled cleanup workflow enforces per-environment retention:
+  - DEV: 20 successful activations
+  - PREPROD: 20
+  - PROD: 50
+- Cleanup never removes active/in-progress/protected artifacts.
+- Environment-local copy independence is preserved (obsolete DEV local copy may be removed while same artifact identity remains active in PROD).
 
 ---
 
@@ -1628,11 +1558,16 @@ All AI Lambdas read their prompt configuration (system message, user message tem
 
 | Lambda | Trigger | Responsibility |
 |--------|---------|---------------|
-| `getDeployContext` | `GET /mappings/:id/deploy-context` | Aggregates: latest version, validation status, all environment statuses, recent history, schema refs. Single call for the Deployment Page. |
-| `deployMapping` | `POST /mappings/:id/deploy` | Creates immutable snapshot → S3. Writes deployment record → DynamoDB. Updates active pointer. |
-| `promoteDeploy` | `POST /mappings/:id/promote` | Reads snapshot from source environment. Sets as active in target environment. |
-| `rollbackDeploy` | `POST /mappings/:id/rollback` | Sets active pointer to a previous snapshot. |
-| `getDeploymentDiff` | `GET /mappings/:id/diff` | Compares two versions: rule-level diff + schema-level diff. |
+| `getDeployContext` | `GET /mappings/:id/deploy-context` | Aggregates deployment bootstrap context: mapping/project metadata, environment states, and active operation references. |
+| `startDeployOperation` | `POST /mappings/:id/deployments` | Validates version-only DEV deploy contract and starts async deploy operation (`202`). |
+| `startPromotionOperation` | `POST /mappings/:id/promotions` | Validates sequential promotion contract and starts async promotion operation (`202`). |
+| `startRollbackOperation` | `POST /mappings/:id/rollbacks` | Validates rollback contract (reason required) and starts async rollback operation (`202`). |
+| `retryDeploymentOperation` | `POST /deployment-operations/:id/retry` | Starts retry operation linked to prior operation via `retryOfOperationId`. |
+| `getDeploymentOperation` | `GET /deployment-operations/:id` | Returns operation status/stage/outcome payload for polling/resume UX. |
+| `listDeployments` | `GET /deployments` | Returns projection-backed global deployment summaries (full-population filter/sort/pagination). |
+| `listProjectDeployments` | `GET /projects/:id/deployments` | Returns projection-backed project deployment summaries. |
+| `reconcileDeploymentOperations` | Scheduled | Repairs ambiguous/timed-out operation + projection mismatch states using runtime authority. |
+| `cleanupDeploymentArtifacts` | Scheduled | Enforces retention/protection policy and updates rollback eligibility metadata. |
 
 #### GitHub Lambdas
 
@@ -1651,7 +1586,7 @@ All AI Lambdas read their prompt configuration (system message, user message tem
 
 | Lambda           | Trigger                      | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `previewMapping` | `POST /mappings/:id/preview` | Receives sample source data and a target environment (DEV / QA / PROD). Looks up the target environment's generic mapping Lambda URL from configuration. Invokes that environment's Lambda with `{ mappingId, sourceData }` — the exact same invocation that production Step Functions use. Returns the environment Lambda's response (transformed output + diagnostics) back to the UI. Also returns metadata: environment name, snapshot version, deployed timestamp. Returns `404` if no active deployment exists for the selected environment. This is a pass-through that validates the real production path. |
+| `previewMapping` | `POST /mappings/:id/preview` | Receives sample source data and a target environment (DEV / PREPROD / PROD). Looks up the target environment's generic mapping Lambda URL from configuration. Invokes that environment's Lambda with `{ mappingId, sourceData }` — the exact same invocation that production Step Functions use. Returns the environment Lambda's response (transformed output + diagnostics) back to the UI. Also returns metadata: environment name, snapshot version, deployed timestamp. Returns `404` if no active deployment exists for the selected environment. This is a pass-through that validates the real production path. |
 
 ---
 
@@ -1734,7 +1669,7 @@ Stores the tree representation of every ingested schema.
 |-----|------|-------------|
 | `mappingId` (PK) | String | |
 | `envVersion` (SK) | String | `{ENV}#{version}` (e.g., `DEV#7`) |
-| `environment` | String | `DEV`, `QA`, `PROD` |
+| `environment` | String | `DEV`, `PREPROD`, `PROD` |
 | `version` | Number | Mapping version deployed |
 | `snapshotId` | String | S3 key for immutable snapshot |
 | `deployedAt` | String | |
@@ -1862,11 +1797,14 @@ GET    /templates                      List templates
 GET    /templates/:id                  Get template detail
 
 ── Deployment ──────────────────────────────────────────
-GET    /mappings/:id/deploy-context    Full context for deployment page
-POST   /mappings/:id/deploy            Deploy to environment
-POST   /mappings/:id/promote           Promote between environments
-POST   /mappings/:id/rollback          Rollback to previous version
-GET    /mappings/:id/diff              Diff between two versions
+GET    /deployments                    Global deployment summaries (projection-backed)
+GET    /projects/:id/deployments       Project deployment summaries (projection-backed)
+GET    /mappings/:id/deploy-context    Full context for mapping deployment page
+POST   /mappings/:id/deployments       Start DEV deploy operation (async, 202)
+POST   /mappings/:id/promotions        Start promotion operation (async, 202)
+POST   /mappings/:id/rollbacks         Start rollback operation (async, 202)
+POST   /deployment-operations/:id/retry Retry operation (async, 202)
+GET    /deployment-operations/:id      Operation status for polling/resume
 
 ── GitHub: CDM Repo (read-only) ────────────────────────
 GET    /github/cdm/files               List files in CDM repo
@@ -2013,8 +1951,8 @@ POST   /mappings/:id/preview           Execute sample data against a deployed sn
 
 **Features:**
 - Deployment Page with all six sections (current state, environment comparison, diff, deploy actions, history, approval placeholder).
-- Deploy to DEV/QA/PROD.
-- Promote DEV → QA, QA → PROD.
+- Deploy to DEV.
+- Promote DEV → PREPROD, PREPROD → PROD.
 - Rollback to previous versions.
 - Immutable snapshots in S3.
 - Read-only deploy status badges on Home Dashboard and Project Overview.
@@ -2023,7 +1961,7 @@ POST   /mappings/:id/preview           Execute sample data against a deployed sn
 
 **Acceptance criteria:**
 - Given a mapping at v7 with DEV on v5, when the BA opens the Deployment Page, then Section C shows "3 rules added, 7 modified, 1 removed" as the diff from v5 → v7.
-- Given a mapping deployed to DEV at v7, when BA promotes DEV → QA, then QA runs the exact same snapshot (same snapshotId) as DEV.
+- Given a mapping deployed to DEV at v7, when BA promotes DEV → PREPROD, then PREPROD runs the exact same snapshot (same snapshotId) as DEV.
 - Given a mapping deployed to PROD at v3, when BA clicks "Rollback to v2", then PROD's active snapshot changes to v2's snapshot.
 
 ### Phase 5: Governance & Activity (Future)
@@ -2062,7 +2000,7 @@ POST   /mappings/:id/preview           Execute sample data against a deployed sn
 | #   | Question                                                                                                           | Impact                                                                     | Status                                                                                                                    |
 | --- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | 1   | What is the complete KeyRa DSL specification?                                                                      | Blocks engine implementation, expression builder UI, and AI prompt design. | Resolved - see `specs/KEYRA-DSL-SPECIFICATION`                                                                            |
-| 2   | Should "Deploy to DEV" be one-click from the Deployment Page, or require additional gates even for DEV?            | Affects TTFSM for iterative development.                                   | Proposed: one-click for DEV, promotion model for QA/PROD.                                                                 |
+| 2   | Should "Deploy to DEV" be one-click from the Deployment Page, or require additional gates even for DEV?            | Affects TTFSM for iterative development.                                   | Proposed: one-click for DEV, promotion model for PREPROD/PROD.                                                            |
 | 3   | What GitHub App or authentication method will be used for the GitHub API?                                          | Affects rate limits, permissions model, and setup complexity.              | TBD.                                                                                                                      |
 | 4   | Should the template library be community-contributed or team-curated only?                                         | Affects template quality and governance.                                   | Proposed: team-curated for MVP, community-contributed future.                                                             |
 | 5   | What is the maximum mapping config size to support?                                                                | Affects DynamoDB item size decisions and S3 usage patterns.                | Proposed: configs > 400KB stored in S3, referenced from DynamoDB.                                                         |
@@ -2083,12 +2021,12 @@ POST   /mappings/:id/preview           Execute sample data against a deployed sn
 | **CDM** | Canonical Data Model. Company-wide standard schemas maintained by the DCA team. |
 | **DCA** | Data & Content Architecture. The team that manages CDM schemas. |
 | **DSL** | Domain-Specific Language. KeyRa's custom expression language for defining transformation rules. |
-| **Environment** | A deployment target: DEV, QA, or PROD. |
+| **Environment** | A deployment target: DEV, PREPROD, or PROD. |
 | **Expression** | A DSL statement that defines how to compute a target field value from source data. |
 | **Mapping** | A set of DSL rules that transforms data from a source schema to a target schema. |
 | **Mapping config** | The JSON document containing all rules, configuration, and metadata for a mapping. |
 | **Preview** | Client-side execution of a mapping against sample data to verify correctness before deployment. |
-| **Promote** | Copy a deployed snapshot from one environment to another (e.g., DEV → QA). |
+| **Promote** | Copy a deployed snapshot from one environment to another (e.g., DEV → PREPROD). |
 | **RAG** | Retrieval-Augmented Generation. A pattern that retrieves relevant context from a database before generating AI output, avoiding the need to include entire large schemas in a single prompt. |
 | **Rule** | A single instruction mapping one target field to a DSL expression. |
 | **Schema** | A structural definition of a data format (JSON Schema or XSD). Describes field names, types, nesting, and requirements. |

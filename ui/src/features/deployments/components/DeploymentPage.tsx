@@ -28,12 +28,14 @@ import { prefetchMappingEditorByIntent } from '@/lib/query';
 import type { RuntimeEnvironment } from '@/lib/types';
 import { PATHS } from '@/routes/paths';
 
-type PipelineEnvironment = 'SANDBOX' | 'DEV' | 'PREPROD' | 'PROD';
+type PipelineEnvironment = RuntimeEnvironment;
 
-const PIPELINE_ORDER: readonly PipelineEnvironment[] = ['SANDBOX', 'DEV', 'PREPROD', 'PROD'];
+const PIPELINE_ORDER: readonly PipelineEnvironment[] = ['DEV', 'PREPROD', 'PROD'];
 
 const HISTORY_FILTERS = ['all', 'deploy', 'promote', 'rollback'] as const;
 type HistoryFilter = (typeof HISTORY_FILTERS)[number];
+
+type ActionKind = 'deploy' | 'promote' | 'rollback';
 
 interface EnvironmentSnapshot {
   readonly sourceType: 'revision' | 'version' | null;
@@ -54,6 +56,13 @@ interface DeploymentCandidate {
   readonly revisionNumber: number;
   readonly createdAt: string;
   readonly createdBy: string;
+}
+
+interface DeploymentDiffSummary {
+  readonly title: string;
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly bullets: readonly string[];
 }
 
 type PrimaryActionState =
@@ -78,6 +87,14 @@ type PrimaryActionState =
     readonly reason: string;
     readonly kind: 'none';
   };
+
+interface PendingActionConfirmation {
+  readonly kind: ActionKind;
+  readonly title: string;
+  readonly confirmLabel: string;
+  readonly message: string;
+  readonly reasonRequired: boolean;
+}
 
 function getDeploymentCandidate(versions: readonly { version: number; revisionNumber: number; createdAt: string; createdBy: string }[]): DeploymentCandidate | null {
   const first = versions[0];
@@ -119,10 +136,6 @@ function fmtEnv(env: PipelineEnvironment): string {
 function fmtSource(snapshot: EnvironmentSnapshot): string {
   if (!snapshot.sourceType) return 'Not deployed';
   return snapshot.sourceType === 'revision' ? `Rev ${snapshot.sourceNumber ?? '?'}` : `v${snapshot.sourceNumber ?? '?'}`;
-}
-
-function mapRuntimeEnvironment(env: PipelineEnvironment): RuntimeEnvironment {
-  return env === 'SANDBOX' ? 'DEV' : env;
 }
 
 function getHistoryRecordType(record: DeploymentRecord): 'deploy' | 'promote' | 'rollback' {
@@ -318,6 +331,9 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
   const [pendingPrimary, setPendingPrimary] = useState<PrimaryActionState | null>(null);
   const [pendingRollback, setPendingRollback] = useState<DeploymentRecord | null>(null);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingActionConfirmation | null>(null);
+  const [actionReason, setActionReason] = useState('');
+  const [reasonValidationError, setReasonValidationError] = useState<string | null>(null);
 
   const editorPath = PATHS.MAPPING_EDITOR.replace(':projectId', projectId).replace(':mappingId', mappingId);
 
@@ -347,39 +363,23 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
     });
 
     return {
-      SANDBOX: from(dev),
       DEV: from(dev),
       PREPROD: from(preprod),
       PROD: from(prod),
     };
   }, [currentDeployments]);
 
-  const selectedEnv: PipelineEnvironment = environment === 'SANDBOX'
-    ? 'SANDBOX'
-    : environment === 'QA'
-      ? 'PREPROD'
-      : environment;
+  const selectedEnv: PipelineEnvironment = environment;
 
   const primaryAction: PrimaryActionState = useMemo(() => {
-    if (selectedEnv === 'SANDBOX') {
-      const hasCandidate = Boolean(candidate);
-      return {
-        kind: 'deploy',
-        targetEnvironment: 'DEV',
-        label: hasCandidate ? `Deploy v${candidate?.version ?? ''} to SANDBOX` : 'Deploy to SANDBOX',
-        disabled: !hasCandidate || isDeploying,
-        ...(hasCandidate ? {} : { reason: 'Create a saved version milestone before deploying.' }),
-      };
-    }
-
     if (selectedEnv === 'DEV') {
       const hasCandidate = Boolean(candidate);
       return {
         kind: 'deploy',
         targetEnvironment: 'DEV',
-        label: 'Promote SANDBOX snapshot to DEV',
+        label: hasCandidate ? `Deploy v${candidate?.version ?? ''} to DEV` : 'Deploy to DEV',
         disabled: !hasCandidate || isDeploying,
-        ...(hasCandidate ? {} : { reason: 'A saved version candidate is required before promoting to DEV.' }),
+        ...(hasCandidate ? {} : { reason: 'A saved version candidate is required before deploying to DEV.' }),
       };
     }
 
@@ -418,16 +418,9 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
   }, [candidate, isDeploying, selectedEnv, snapshots]);
 
   const readinessChecks: readonly ReadinessCheck[] = useMemo(() => {
-    if (selectedEnv === 'SANDBOX') {
-      return [
-        { key: 'saved-version', label: 'Saved version is available for deploy', passed: Boolean(candidate) },
-      ];
-    }
-
     if (selectedEnv === 'DEV') {
       return [
-        { key: 'saved-version', label: 'Saved version is available for promotion target', passed: Boolean(candidate) },
-        { key: 'dev-runtime-path', label: 'Promotion target runtime path is available', passed: true },
+        { key: 'saved-version', label: 'Saved version is available for deploy', passed: Boolean(candidate) },
       ];
     }
 
@@ -456,15 +449,13 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
     }
 
     if (action.kind === 'promote') {
-      await promote(action.from, action.to);
+      await promote(action.from, action.to, actionReason.trim() || undefined);
     }
   }
 
   const historyByStage = useMemo<Record<PipelineEnvironment, readonly DeploymentRecord[]>>(() => {
-    const sandboxAlias = deploymentHistory.filter((record) => record.environment === 'DEV');
     return {
-      SANDBOX: sandboxAlias,
-      DEV: sandboxAlias,
+      DEV: deploymentHistory.filter((record) => record.environment === 'DEV'),
       PREPROD: deploymentHistory.filter((record) => record.environment === 'PREPROD'),
       PROD: deploymentHistory.filter((record) => record.environment === 'PROD'),
     };
@@ -480,24 +471,58 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
   }, [deploymentHistory, historyFilter]);
 
   function openPrimaryConfirmation() {
+    if (primaryAction.kind === 'none') {
+      return;
+    }
+
+    const reasonRequired = primaryAction.kind === 'promote' && primaryAction.to === 'PROD';
+    const title = primaryAction.kind === 'deploy' ? 'Confirm deployment action' : 'Confirm promotion action';
     setPendingPrimary(primaryAction);
+    setPendingConfirmation({
+      kind: primaryAction.kind,
+      title,
+      confirmLabel: primaryAction.kind === 'deploy' ? 'Deploy' : 'Promote',
+      message: primaryAction.label,
+      reasonRequired,
+    });
+    setReasonValidationError(null);
+    setActionReason('');
   }
 
   function closePrimaryConfirmation() {
     setPendingPrimary(null);
+    setPendingConfirmation(null);
+    setReasonValidationError(null);
+    setActionReason('');
   }
 
   async function confirmPrimaryAction() {
+    if (pendingConfirmation?.reasonRequired && actionReason.trim().length === 0) {
+      setReasonValidationError('Reason is required for PROD promotion.');
+      return;
+    }
+
     if (pendingPrimary) {
       await executePrimaryAction(pendingPrimary);
     }
-    setPendingPrimary(null);
+    closePrimaryConfirmation();
   }
 
   async function confirmRollback() {
-    if (!pendingRollback) return;
-    await rollback(mapRuntimeEnvironment(selectedEnv), pendingRollback.environmentDeployedAt);
+    if (!pendingRollback) {
+      return;
+    }
+
+    if (actionReason.trim().length === 0) {
+      setReasonValidationError('Reason is required for rollback.');
+      return;
+    }
+
+    await rollback(selectedEnv, pendingRollback.environmentDeployedAt, actionReason.trim());
     setPendingRollback(null);
+    setPendingConfirmation(null);
+    setReasonValidationError(null);
+    setActionReason('');
   }
 
   const selectedHistory = useMemo(
@@ -506,6 +531,49 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
   );
   const rollbackTarget = selectedHistory.length > 1 ? selectedHistory[1] : null;
   const canRollback = rollbackTarget !== null;
+
+  const deploymentDiffSummary = useMemo<DeploymentDiffSummary>(() => {
+    if (selectedEnv === 'DEV') {
+      const fromLabel = snapshots.DEV.artifactId
+        ? `Active DEV artifact ${snapshots.DEV.artifactId}`
+        : 'No active DEV artifact';
+      const toLabel = candidate ? `Version v${candidate.version}` : 'No selected version';
+      const bullets = candidate
+        ? [
+            'Compares immutable version payload against active DEV artifact manifest.',
+            'Includes mapping rules, schema refs, value-map snapshots, constants/defaults, and engine/DSL metadata.',
+          ]
+        : ['Create a version milestone to generate immutable diff context.'];
+      return {
+        title: "What’s Changing (DEV deploy)",
+        fromLabel,
+        toLabel,
+        bullets,
+      };
+    }
+
+    if (selectedEnv === 'PREPROD') {
+      return {
+        title: "What’s Changing (DEV → PREPROD)",
+        fromLabel: snapshots.DEV.artifactId ? `DEV ${snapshots.DEV.artifactId}` : 'DEV not deployed',
+        toLabel: snapshots.PREPROD.artifactId ? `PREPROD ${snapshots.PREPROD.artifactId}` : 'PREPROD not deployed',
+        bullets: [
+          'Compares immutable DEV active artifact to PREPROD active artifact.',
+          'Promotion reuses exact artifact bytes/hash identity.',
+        ],
+      };
+    }
+
+    return {
+      title: "What’s Changing (PREPROD → PROD)",
+      fromLabel: snapshots.PREPROD.artifactId ? `PREPROD ${snapshots.PREPROD.artifactId}` : 'PREPROD not deployed',
+      toLabel: snapshots.PROD.artifactId ? `PROD ${snapshots.PROD.artifactId}` : 'PROD not deployed',
+      bullets: [
+        'Compares immutable PREPROD active artifact to PROD active artifact.',
+        'Promotion to PROD requires reason and preserves immutable artifact identity.',
+      ],
+    };
+  }, [candidate, selectedEnv, snapshots]);
 
   function handlePipelineCardKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     const index = PIPELINE_ORDER.indexOf(selectedEnv);
@@ -535,7 +603,7 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
     <div className="mx-auto max-w-6xl px-6 py-8" data-testid="deployment-page">
       <PageHeader
         title={mappingName ? `Deploy: ${mappingName}` : 'Deploy Mapping'}
-        description="Promote a single immutable snapshot through SANDBOX → DEV → PREPROD → PROD."
+        description="Deploy versioned immutable artifacts through DEV → PREPROD → PROD."
         actions={
           <Link
             to={editorPath}
@@ -607,7 +675,7 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
       {!isLoading && (
         <>
           <section aria-label="Deployment pipeline" className="mb-6" data-testid="deployment-pipeline-cards">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-4" role="tablist" aria-label="Deployment stage selector">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3" role="tablist" aria-label="Deployment stage selector">
               {PIPELINE_ORDER.map((env) => {
                 const snapshot = snapshots[env];
                 const selected = env === selectedEnv;
@@ -631,7 +699,7 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-semibold text-slate-100">{label}</span>
-                      <span className="text-xs text-slate-400">{env === 'SANDBOX' ? 'Deploy' : 'Promote'}</span>
+                      <span className="text-xs text-slate-400">{env === 'DEV' ? 'Deploy' : 'Promote'}</span>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">{fmtSource(snapshot)}</p>
                     {snapshot.artifactId && (
@@ -667,13 +735,29 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
                 <h2 className="text-sm font-semibold uppercase tracking-wide">Change Summary</h2>
               </div>
               <p className="text-sm text-slate-300">
-                {selectedEnv === 'SANDBOX'
-                  ? 'Deploy the latest saved version to establish the SANDBOX active snapshot.'
-                  : `Promote the currently active ${selectedEnv === 'DEV' ? 'SANDBOX' : selectedEnv === 'PREPROD' ? 'DEV' : 'PREPROD'} snapshot without rebuilding artifacts.`}
+                {selectedEnv === 'DEV'
+                  ? 'Deploy the latest saved version to DEV using immutable version artifacts.'
+                  : `Promote the currently active ${selectedEnv === 'PREPROD' ? 'DEV' : 'PREPROD'} snapshot without rebuilding artifacts.`}
               </p>
               <p className="mt-2 text-xs text-slate-500" data-testid="selected-stage-source">
                 Active snapshot: {fmtSource(selectedSnapshot)}
               </p>
+              <div className="mt-3 rounded border border-slate-700/80 bg-slate-950/40 p-3" data-testid="deployment-diff-summary">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-200">
+                  {deploymentDiffSummary.title}
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  From: <span className="font-mono text-slate-300">{deploymentDiffSummary.fromLabel}</span>
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  To: <span className="font-mono text-slate-300">{deploymentDiffSummary.toLabel}</span>
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-400">
+                  {deploymentDiffSummary.bullets.map((bullet) => (
+                    <li key={bullet}>{bullet}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-4" data-testid="readiness-panel">
@@ -710,7 +794,22 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
               type="button"
               variant="secondary"
               disabled={!canRollback || isDeploying}
-              onClick={() => setPendingRollback(rollbackTarget)}
+              onClick={() => {
+                if (!rollbackTarget) {
+                  return;
+                }
+
+                setPendingRollback(rollbackTarget);
+                setPendingConfirmation({
+                  kind: 'rollback',
+                  title: 'Confirm rollback',
+                  confirmLabel: 'Rollback',
+                  message: `Roll back ${fmtEnv(selectedEnv)} to ${rollbackTarget.sourceType === 'revision' ? `Rev ${rollbackTarget.sourceNumber}` : `v${rollbackTarget.sourceNumber}`}?`,
+                  reasonRequired: true,
+                });
+                setActionReason('');
+                setReasonValidationError(null);
+              }}
               data-testid="secondary-rollback-action"
             >
               Roll back {fmtEnv(selectedEnv)}
@@ -798,10 +897,36 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
       )}
 
       <ConfirmDialog
-        open={Boolean(pendingPrimary)}
-        title="Confirm deployment action"
-        message={pendingPrimary?.label ?? ''}
-        confirmLabel={pendingPrimary?.kind === 'deploy' ? 'Deploy' : 'Promote'}
+        open={Boolean(pendingPrimary && pendingConfirmation?.kind !== 'rollback')}
+        title={pendingConfirmation?.title ?? 'Confirm deployment action'}
+        message={
+          <div className="space-y-3">
+            <p>{pendingConfirmation?.message ?? pendingPrimary?.label ?? ''}</p>
+            {pendingConfirmation?.kind === 'promote' && (
+              <label className="block text-left text-xs text-slate-300" htmlFor="deployment-action-reason-input">
+                Reason {pendingConfirmation.reasonRequired ? '(required)' : '(optional)'}
+                <textarea
+                  id="deployment-action-reason-input"
+                  value={actionReason}
+                  onChange={(event) => {
+                    setActionReason(event.target.value);
+                    if (reasonValidationError) {
+                      setReasonValidationError(null);
+                    }
+                  }}
+                  rows={3}
+                  className="mt-1 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  placeholder={pendingConfirmation.reasonRequired ? 'Enter reason for PROD promotion' : 'Optional reason for promotion'}
+                  data-testid="deployment-action-reason-input"
+                />
+              </label>
+            )}
+            {reasonValidationError && (
+              <p className="text-xs text-red-300" data-testid="deployment-action-reason-error">{reasonValidationError}</p>
+            )}
+          </div>
+        }
+        confirmLabel={pendingConfirmation?.confirmLabel ?? (pendingPrimary?.kind === 'deploy' ? 'Deploy' : 'Promote')}
         cancelLabel="Cancel"
         onConfirm={() => {
           void confirmPrimaryAction();
@@ -810,17 +935,44 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
       />
 
       <ConfirmDialog
-        open={Boolean(pendingRollback)}
-        title="Confirm rollback"
-        message={pendingRollback
-          ? `Roll back ${fmtEnv(selectedEnv)} to ${pendingRollback.sourceType === 'revision' ? `Rev ${pendingRollback.sourceNumber}` : `v${pendingRollback.sourceNumber}`}?`
-          : ''}
-        confirmLabel="Rollback"
+        open={Boolean(pendingRollback && pendingConfirmation?.kind === 'rollback')}
+        title={pendingConfirmation?.title ?? 'Confirm rollback'}
+        message={
+          <div className="space-y-3">
+            <p>{pendingConfirmation?.message ?? ''}</p>
+            <label className="block text-left text-xs text-slate-300" htmlFor="rollback-reason-input">
+              Reason (required)
+              <textarea
+                id="rollback-reason-input"
+                value={actionReason}
+                onChange={(event) => {
+                  setActionReason(event.target.value);
+                  if (reasonValidationError) {
+                    setReasonValidationError(null);
+                  }
+                }}
+                rows={3}
+                className="mt-1 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                placeholder="Enter rollback reason"
+                data-testid="rollback-reason-input"
+              />
+            </label>
+            {reasonValidationError && (
+              <p className="text-xs text-red-300" data-testid="rollback-reason-error">{reasonValidationError}</p>
+            )}
+          </div>
+        }
+        confirmLabel={pendingConfirmation?.confirmLabel ?? 'Rollback'}
         cancelLabel="Cancel"
         onConfirm={() => {
           void confirmRollback();
         }}
-        onCancel={() => setPendingRollback(null)}
+        onCancel={() => {
+          setPendingRollback(null);
+          setPendingConfirmation(null);
+          setActionReason('');
+          setReasonValidationError(null);
+        }}
       />
     </div>
   );

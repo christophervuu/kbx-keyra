@@ -7,6 +7,7 @@ export interface HttpRequestConfig {
   path: string;
   method: HttpMethod;
   body?: unknown;
+  headers?: Record<string, string>;
   timeout?: number;
   retry?: boolean;
   retryConfig?: Partial<RetryConfig>;
@@ -110,11 +111,13 @@ async function sendRequest<T>(config: HttpRequestConfig): Promise<T> {
   const requestInit: RequestInitLike = {
     method: config.method,
     signal: controller.signal,
+    ...(config.headers ? { headers: config.headers } : {}),
   };
 
   if (config.method !== 'GET' && config.body !== undefined) {
     requestInit.headers = {
       'Content-Type': 'application/json',
+      ...(config.headers ?? {}),
     };
     requestInit.body = JSON.stringify(config.body);
   }

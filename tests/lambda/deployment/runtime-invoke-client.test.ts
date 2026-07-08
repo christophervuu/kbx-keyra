@@ -33,9 +33,9 @@ describe('runtime invoke client', () => {
     lambdaMocks.InvokeCommand.mockClear();
     lambdaMocks.LambdaClient.mockClear();
 
-    envStore().RUNTIME_EXECUTE_FUNCTION_ARN_DEV = 'arn:aws:lambda:us-east-1:111111111111:function:dev-keyra-runtime-execute';
-    envStore().RUNTIME_EXECUTE_FUNCTION_ARN_PREPROD = 'arn:aws:lambda:us-east-1:222222222222:function:preprod-keyra-runtime-execute';
-    envStore().RUNTIME_EXECUTE_FUNCTION_ARN_PROD = 'arn:aws:lambda:us-east-1:333333333333:function:prod-keyra-runtime-execute';
+    envStore().RUNTIME_EXECUTE_FUNCTION_ARN_DEV = 'arn:aws:lambda:us-east-1:111111111111:function:kbx-integrations-keyra-runtime-execute-mapping';
+    envStore().RUNTIME_EXECUTE_FUNCTION_ARN_PREPROD = 'arn:aws:lambda:us-east-1:222222222222:function:kbx-integrations-keyra-runtime-execute-mapping';
+    envStore().RUNTIME_EXECUTE_FUNCTION_ARN_PROD = 'arn:aws:lambda:us-east-1:333333333333:function:kbx-integrations-keyra-runtime-execute-mapping';
   });
 
   it('invokes runtime execute lambda directly and maps canonical response metadata', async () => {
@@ -98,7 +98,7 @@ describe('runtime invoke client', () => {
       FunctionName?: string;
       Payload?: Uint8Array;
     };
-    expect(invokeInput.FunctionName).toContain(':function:preprod-keyra-runtime-execute');
+    expect(invokeInput.FunctionName).toContain(':function:kbx-integrations-keyra-runtime-execute-mapping');
 
     const payloadText = new TextDecoder().decode(invokeInput.Payload);
     const payloadObject = JSON.parse(payloadText) as { body: string };

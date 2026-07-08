@@ -16,7 +16,14 @@ const sharedMocks = vi.hoisted(() => ({
   ERROR_CODES: { VALIDATION_ERROR: 'VALIDATION_ERROR' },
 }));
 
+const deploymentSummariesMocks = vi.hoisted(() => ({
+  upsert: vi.fn(),
+}));
+
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
+vi.mock('../../../src/lib/persistence/deployment-summaries.js', () => ({
+  upsert: deploymentSummariesMocks.upsert,
+}));
 
 async function importHandler() {
   return import('../../../src/lambda/mapping/create-version.js');
@@ -60,6 +67,7 @@ describe('create-version handler', () => {
     sharedMocks.putItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.putObject.mockReset().mockResolvedValue(undefined);
     sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
+    deploymentSummariesMocks.upsert.mockReset().mockResolvedValue(undefined);
     sharedMocks.requireFields.mockReset().mockReturnValue({ ok: true });
     sharedMocks.notFound.mockReset().mockReturnValue({ code: 'RESOURCE_NOT_FOUND', message: "Mapping with id 'map-1' not found", statusCode: 404, retryable: false });
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
@@ -75,5 +83,6 @@ describe('create-version handler', () => {
     const parsed = JSON.parse(result.body) as { version: number; revisionNumber: number };
     expect(parsed.version).toBe(3);
     expect(parsed.revisionNumber).toBe(2);
+    expect(deploymentSummariesMocks.upsert).toHaveBeenCalledTimes(1);
   });
 });

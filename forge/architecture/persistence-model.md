@@ -786,3 +786,127 @@ FS-105 migration/backfill persistence scope includes historical artifacts:
 
 Migration must be idempotent, restartable, dry-run capable, and parity-verifiable before destructive cleanup.
 
+---
+
+## 12) FS-106 deployment projection + operation persistence addendum
+
+FS-106 introduces required deployment read-projection and operation persistence contracts for deployment management at scale.
+
+### 12.1 Canonical deployment environment persistence
+
+Active executable deployment environments are:
+
+- `DEV`
+- `PREPROD`
+- `PROD`
+
+`SANDBOX`, `QA`, and `STAGING` are not valid new executable deployment environment values.
+
+### 12.2 Deployment operations persistence model
+
+Control-plane deployment operation records must persist separated state dimensions:
+
+- `operationType` (`DEPLOY|PROMOTE|ROLLBACK|RETRY`)
+- `operationStatus` (`QUEUED|RUNNING|SUCCEEDED|FAILED|TIMED_OUT`)
+- `operationStage` (`VALIDATING_REQUEST|RESOLVING_VERSION|BUILDING_ARTIFACT|VALIDATING_ARTIFACT|TRANSFERRING_ARTIFACT|ACTIVATING_ARTIFACT|VERIFYING_RUNTIME|UPDATING_PROJECTION|FINALIZING`)
+
+Additional required operation fields:
+
+- `operationId`, `mappingId`, `projectId`
+- `sourceEnvironment`, `targetEnvironment`, `sourceVersion`
+- `artifactId`, `artifactHash`
+- actor metadata (`actorType`, `actorId`, optional display/email)
+- timestamps (`requestedAt`, `startedAt`, `completedAt`)
+- failure metadata (`failureCode`, `failureMessage`, `retryable`)
+- `retryOfOperationId` (when `operationType=RETRY`)
+
+### 12.3 Deployment summaries projection model
+
+Required control-plane projection table:
+
+- `integrations-keyra-deployment-summaries`
+
+Required indexes:
+
+- `GlobalActivityIndex` (`globalPartition`, `lastActivityAt`)
+- `ProjectActivityIndex` (`projectId`, `lastActivityAt`)
+- `AttentionIndex` (`attentionState`, `lastActivityAt`)
+
+Projection row includes:
+
+- mapping/project identity metadata,
+- per-environment active artifact/version/freshness/last-op fields,
+- cross-environment summary fields (`promotionState`, `attentionState`, `activeOperationId`, `lastActivityAt`, actor summary),
+- `updatedAt`.
+
+Projection rows are initialized for mappings that have never been deployed.
+
+### 12.4 Projection consistency contract
+
+Projection is eventually consistent and not runtime authority.
+
+If runtime activation succeeds but projection update fails:
+
+- runtime active pointer remains authoritative,
+- control-plane marks mismatch,
+- reconciliation repairs projection and operation terminal alignment.
+
+### 12.5 Deployment freshness + promotion state persistence
+
+Per-environment freshness values:
+
+- `NOT_DEPLOYED`
+- `CURRENT`
+- `STALE`
+
+Promotion state values:
+
+- `NOT_APPLICABLE`
+- `ALIGNED`
+- `AVAILABLE`
+- `BLOCKED`
+
+`ROLLED_BACK` is not persisted as freshness.
+
+### 12.6 Artifact identity persistence contract
+
+FS-106 artifact identity is deterministic and metadata-independent:
+
+- `artifactHash` from canonical serialized self-contained runtime bundle bytes,
+- deployment metadata (environment/actor/reason/time) excluded from hash input,
+- `artifactId` content-addressed or permanently bound to hash,
+- same `artifactId` must never map to different bytes.
+
+Promotion and rollback must preserve `artifactId` + `artifactHash` unchanged.
+
+### 12.7 Retention cleanup persistence behavior
+
+Retention enforcement is scheduled workflow-driven (not S3 lifecycle count logic).
+
+Cleanup policy per environment:
+
+- DEV: retain last 20 successful activations per mapping
+- PREPROD: retain last 20
+- PROD: retain last 50
+
+Protection checks before deletion:
+
+- active in that environment,
+- referenced by in-progress operation,
+- inside rollback retention window,
+- required as current promotion source.
+
+Cleanup updates rollback-eligibility state in history metadata.
+
+Environment-local copy nuance: obsolete DEV local artifact copy may be deleted even if same artifact identity remains active in PROD local runtime.
+
+### 12.8 Actor persistence contract
+
+Persist actor as:
+
+- `actorType` (`USER|SERVICE|DEVELOPMENT`)
+- `actorId`
+- optional `actorDisplayName`
+- optional `actorEmail`
+
+Do not persist generic `system` for user-initiated actions.

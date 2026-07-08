@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 import { computeConfigHash } from './hash.js';
 import { dynamoClient } from './clients.js';
@@ -9,7 +9,7 @@ import {
   deploymentHistorySortKey,
   schemaVersionContentKey,
 } from './config.js';
-import { put as putDeploymentSnapshot } from './s3/deployment-snapshot.js';
+import { put as putDeploymentSnapshot, remove as removeDeploymentSnapshot } from './s3/deployment-snapshot.js';
 import type {
   ActiveSnapshotItem,
   AppendDeploymentHistoryInput,
@@ -25,6 +25,8 @@ import type {
 import { normalizeRuntimeDeploymentEnvironment } from './types.js';
 
 const ENVIRONMENTS: readonly DeploymentEnvironment[] = ['DEV', 'PREPROD', 'PROD'];
+
+const TERMINAL_OPERATION_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'TIMED_OUT']);
 
 export class DeploymentArtifactIntegrityError extends Error {
   constructor(message: string) {
@@ -173,6 +175,8 @@ export async function create(input: CreateDeploymentInput): Promise<DeploymentIt
     configHash,
     deployedAt,
     deployedBy: input.deployedBy,
+    rollbackEligible: true,
+    rollbackEligibilityUpdatedAt: deployedAt,
     ...(input.cdmSchemaTraceability ? { cdmSchemaTraceability: input.cdmSchemaTraceability } : {}),
     ...(input.promotedFrom ? { promotedFrom: input.promotedFrom } : {}),
     ...(input.rollbackOf ? { rollbackOf: input.rollbackOf } : {}),
@@ -212,6 +216,8 @@ export async function createRollback(input: CreateRollbackDeploymentInput): Prom
     configHash: input.configHash,
     deployedAt,
     deployedBy: input.deployedBy,
+    rollbackEligible: true,
+    rollbackEligibilityUpdatedAt: deployedAt,
     rollbackOf: input.rollbackOf,
   };
 
@@ -328,6 +334,246 @@ export async function listHistory(
   return items;
 }
 
+export interface RetentionCleanupTarget {
+  readonly mappingId: string;
+  readonly environment: DeploymentEnvironment;
+}
+
+export interface RetentionCleanupProtection {
+  readonly activeArtifactId: string | null;
+  readonly inProgressArtifactIds?: readonly string[];
+  readonly rollbackWindowArtifactIds?: readonly string[];
+  readonly promotionSourceArtifactIds?: readonly string[];
+}
+
+export interface RetentionCleanupSelectionInput {
+  readonly mappingId: string;
+  readonly environment: DeploymentEnvironment;
+  readonly retainSuccessfulActivations: number;
+  readonly protection: RetentionCleanupProtection;
+}
+
+export interface RetentionCleanupSelectionResult {
+  readonly protectedItems: DeploymentItem[];
+  readonly deleteCandidates: DeploymentItem[];
+}
+
+function normalizeIsoDate(item: DeploymentItem): string {
+  if (isNonEmptyString(item.deployedAt)) {
+    return item.deployedAt;
+  }
+
+  const separator = item.environmentDeployedAt.indexOf('#');
+  return separator > -1 ? item.environmentDeployedAt.slice(separator + 1) : item.environmentDeployedAt;
+}
+
+function toArtifactSet(values: readonly (string | null | undefined)[]): Set<string> {
+  const set = new Set<string>();
+
+  for (const value of values) {
+    if (!isNonEmptyString(value)) {
+      continue;
+    }
+
+    set.add(value);
+  }
+
+  return set;
+}
+
+function toUniqueHistory(items: readonly DeploymentItem[]): DeploymentItem[] {
+  const seen = new Set<string>();
+  const rows: DeploymentItem[] = [];
+
+  for (const item of items) {
+    if (seen.has(item.environmentDeployedAt)) {
+      continue;
+    }
+
+    seen.add(item.environmentDeployedAt);
+    rows.push(item);
+  }
+
+  return rows;
+}
+
+export async function listRetentionCleanupTargets(): Promise<RetentionCleanupTarget[]> {
+  const targets: RetentionCleanupTarget[] = [];
+  const seen = new Set<string>();
+  let lastEvaluatedKey: Record<string, unknown> | undefined;
+
+  do {
+    const result = await dynamoClient.send(
+      new ScanCommand({
+        TableName: TABLE_NAMES.deployments,
+        ProjectionExpression: 'mappingId, #environment',
+        ExpressionAttributeNames: {
+          '#environment': 'environment',
+        },
+        ExclusiveStartKey: lastEvaluatedKey,
+      }),
+    );
+
+    for (const row of (result.Items as Array<{ mappingId?: unknown; environment?: unknown }> | undefined) ?? []) {
+      if (!isNonEmptyString(row.mappingId) || !isNonEmptyString(row.environment)) {
+        continue;
+      }
+
+      const normalized = normalizeRuntimeDeploymentEnvironment(row.environment);
+      const key = `${row.mappingId}#${normalized}`;
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      targets.push({
+        mappingId: row.mappingId,
+        environment: normalized,
+      });
+    }
+
+    lastEvaluatedKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (lastEvaluatedKey);
+
+  return targets.sort((a, b) => `${a.mappingId}#${a.environment}`.localeCompare(`${b.mappingId}#${b.environment}`));
+}
+
+export async function listInProgressOperationArtifactIds(
+  mappingId: string,
+  environment: DeploymentEnvironment,
+): Promise<string[]> {
+  const artifactIds = new Set<string>();
+  let lastEvaluatedKey: Record<string, unknown> | undefined;
+
+  do {
+    const result = await dynamoClient.send(
+      new ScanCommand({
+        TableName: TABLE_NAMES.deploymentOrchestrations,
+        FilterExpression: 'attribute_exists(operationId) AND mappingId = :mappingId AND targetEnvironment = :targetEnvironment',
+        ProjectionExpression: 'artifactId, operationStatus',
+        ExpressionAttributeValues: {
+          ':mappingId': mappingId,
+          ':targetEnvironment': environment,
+        },
+        ExclusiveStartKey: lastEvaluatedKey,
+      }),
+    );
+
+    for (const row of (result.Items as Array<{ artifactId?: unknown; operationStatus?: unknown }> | undefined) ?? []) {
+      if (!isNonEmptyString(row.artifactId) || !isNonEmptyString(row.operationStatus)) {
+        continue;
+      }
+
+      if (TERMINAL_OPERATION_STATUSES.has(row.operationStatus)) {
+        continue;
+      }
+
+      artifactIds.add(row.artifactId);
+    }
+
+    lastEvaluatedKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (lastEvaluatedKey);
+
+  return [...artifactIds.values()].sort();
+}
+
+export async function selectRetentionCleanupCandidates(
+  input: RetentionCleanupSelectionInput,
+): Promise<RetentionCleanupSelectionResult> {
+  const history = toUniqueHistory(await listHistory(input.mappingId, input.environment));
+  const ordered = [...history].sort((a, b) => normalizeIsoDate(b).localeCompare(normalizeIsoDate(a)));
+  const retainCount = Math.max(0, Math.floor(input.retainSuccessfulActivations));
+
+  const protectedArtifactIds = toArtifactSet([
+    input.protection.activeArtifactId,
+    ...(input.protection.inProgressArtifactIds ?? []),
+    ...(input.protection.rollbackWindowArtifactIds ?? []),
+    ...(input.protection.promotionSourceArtifactIds ?? []),
+  ]);
+
+  const protectedItems: DeploymentItem[] = [];
+  const deleteCandidates: DeploymentItem[] = [];
+
+  for (const [index, item] of ordered.entries()) {
+    const insideRetentionCount = index < retainCount;
+    const protectedByArtifactReference = item.artifactId ? protectedArtifactIds.has(item.artifactId) : false;
+
+    if (insideRetentionCount || protectedByArtifactReference) {
+      protectedItems.push(item);
+      continue;
+    }
+
+    deleteCandidates.push(item);
+  }
+
+  return {
+    protectedItems,
+    deleteCandidates,
+  };
+}
+
+export async function updateRollbackEligibility(
+  mappingId: string,
+  environment: DeploymentEnvironment,
+  rollbackEligibleArtifactIds: readonly string[],
+): Promise<number> {
+  const eligibleSet = toArtifactSet(rollbackEligibleArtifactIds);
+  const history = toUniqueHistory(await listHistory(mappingId, environment));
+  const updatedAt = nowIso();
+  let updatedCount = 0;
+
+  for (const item of history) {
+    const expectedEligible = Boolean(item.artifactId && eligibleSet.has(item.artifactId));
+    const currentEligible = item.rollbackEligible ?? true;
+    if (currentEligible === expectedEligible) {
+      continue;
+    }
+
+    await dynamoClient.send(
+      new UpdateCommand({
+        TableName: TABLE_NAMES.deployments,
+        Key: {
+          mappingId: item.mappingId,
+          environmentDeployedAt: item.environmentDeployedAt,
+        },
+        UpdateExpression: 'SET rollbackEligible = :rollbackEligible, rollbackEligibilityUpdatedAt = :rollbackEligibilityUpdatedAt',
+        ExpressionAttributeValues: {
+          ':rollbackEligible': expectedEligible,
+          ':rollbackEligibilityUpdatedAt': updatedAt,
+        },
+      }),
+    );
+
+    updatedCount += 1;
+  }
+
+  return updatedCount;
+}
+
+export async function deleteDeploymentHistoryEntries(items: readonly DeploymentItem[]): Promise<number> {
+  let deleted = 0;
+
+  for (const item of items) {
+    if (isNonEmptyString(item.configS3Key)) {
+      await removeDeploymentSnapshot(item.configS3Key);
+    }
+
+    await dynamoClient.send(
+      new DeleteCommand({
+        TableName: TABLE_NAMES.deployments,
+        Key: {
+          mappingId: item.mappingId,
+          environmentDeployedAt: item.environmentDeployedAt,
+        },
+      }),
+    );
+
+    deleted += 1;
+  }
+
+  return deleted;
+}
+
 export async function upsertActiveSnapshot(input: UpsertActiveSnapshotInput): Promise<ActiveSnapshotItem> {
   const item: ActiveSnapshotItem = {
     mappingId: input.mappingId,
@@ -427,6 +673,11 @@ export const deployments = {
   getCurrent,
   getCurrentAll,
   listHistory,
+  listRetentionCleanupTargets,
+  listInProgressOperationArtifactIds,
+  selectRetentionCleanupCandidates,
+  updateRollbackEligibility,
+  deleteDeploymentHistoryEntries,
   upsertActiveSnapshot,
   getActiveSnapshot,
   appendDeploymentHistory,

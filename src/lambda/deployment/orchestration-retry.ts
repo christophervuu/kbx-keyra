@@ -1,4 +1,5 @@
 import { updateStatus as updateDeploymentOrchestrationStatus } from '../../lib/persistence/deployment-orchestrations.js';
+import { upsert as upsertDeploymentSummary } from '../../lib/persistence/deployment-summaries.js';
 import {
   getRuntimeEnvironmentConfig,
   loadDeploymentEnvironmentSettings,
@@ -7,6 +8,10 @@ import {
 } from './environment-config.js';
 import type { RuntimeApiClient, RuntimeApiResult, RuntimeStatusResponseData } from './runtime-api-client.js';
 import { ERROR_CODES } from '../shared/errors.js';
+import { emitDeploymentMetric } from './observability.js';
+import { serviceActor } from './actor-context.js';
+
+const RETRY_ACTOR = serviceActor('service:retry', 'Retry Worker');
 
 const DEFAULT_RETRY_POLICY: RuntimeEnvironmentRetryPolicy = {
   maxAttempts: 3,
@@ -48,6 +53,8 @@ export type ExecuteWithRetryResult<TData> = ExecuteWithRetrySuccess<TData> | Exe
 
 export async function executeRuntimeOperationWithRetry<TData>(input: {
   readonly mappingId: string;
+  readonly projectId?: string;
+  readonly mappingName?: string;
   readonly environment: RuntimeEnvironmentKey;
   readonly operationType: OrchestrationOperationType;
   readonly orchestrationId: string;
@@ -106,6 +113,44 @@ export async function executeRuntimeOperationWithRetry<TData>(input: {
         lastErrorMessage: result.message,
       });
 
+      if (input.projectId && input.mappingName) {
+        await upsertDeploymentSummary({
+          mappingId: input.mappingId,
+          projectId: input.projectId,
+          mappingName: input.mappingName,
+          environmentStates: {
+            [input.environment]: {
+              lastOperationStatus: 'RUNNING',
+            },
+          },
+          operationType:
+            input.operationType === 'deploy'
+              ? 'DEPLOY'
+              : input.operationType === 'promote'
+                ? 'PROMOTE'
+                : input.operationType === 'rollback'
+                  ? 'ROLLBACK'
+                  : 'RETRY',
+          operationStatus: 'RUNNING',
+          activeOperationId: input.orchestrationId,
+          actorId: RETRY_ACTOR.actorId,
+          actorDisplayName: RETRY_ACTOR.actorDisplayName,
+        });
+      }
+
+      emitDeploymentMetric({
+        metricName: 'deployment.operation.finalized',
+        mappingId: input.mappingId,
+        projectId: input.projectId,
+        artifactId: input.artifactId,
+        operationId: input.orchestrationId,
+        operationType: input.operationType.toUpperCase(),
+        operationStatus: 'RUNNING',
+        environment: input.environment,
+        value: attemptCount,
+        actor: RETRY_ACTOR,
+      });
+
       await sleep(computeRetryDelayMs(retryPolicy, attemptCount));
       continue;
     }
@@ -120,6 +165,47 @@ export async function executeRuntimeOperationWithRetry<TData>(input: {
       requestId: result.requestId,
       lastErrorCode: result.errorCode,
       lastErrorMessage: result.message,
+    });
+
+    if (input.projectId && input.mappingName) {
+      await upsertDeploymentSummary({
+        mappingId: input.mappingId,
+        projectId: input.projectId,
+        mappingName: input.mappingName,
+        environmentStates: {
+          [input.environment]: {
+            lastOperationStatus: finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+          },
+        },
+        operationType:
+          input.operationType === 'deploy'
+            ? 'DEPLOY'
+            : input.operationType === 'promote'
+              ? 'PROMOTE'
+              : input.operationType === 'rollback'
+                ? 'ROLLBACK'
+                : 'RETRY',
+        operationStatus: finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+        activeOperationId: null,
+        actorId: RETRY_ACTOR.actorId,
+        actorDisplayName: RETRY_ACTOR.actorDisplayName,
+      });
+    }
+
+    emitDeploymentMetric({
+      metricName: 'deployment.operation.finalized',
+      mappingId: input.mappingId,
+      projectId: input.projectId,
+      artifactId: input.artifactId,
+      operationId: input.orchestrationId,
+      operationType: input.operationType.toUpperCase(),
+      operationStatus: finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+      environment: input.environment,
+      value: attemptCount,
+      actor: RETRY_ACTOR,
+      details: {
+        errorCode: result.errorCode,
+      },
     });
 
     return {
@@ -142,6 +228,47 @@ export async function executeRuntimeOperationWithRetry<TData>(input: {
     requestId: input.requestId,
     lastErrorCode: ERROR_CODES.TIMEOUT,
     lastErrorMessage: 'Runtime operation timed out after max attempts.',
+  });
+
+  if (input.projectId && input.mappingName) {
+    await upsertDeploymentSummary({
+      mappingId: input.mappingId,
+      projectId: input.projectId,
+      mappingName: input.mappingName,
+      environmentStates: {
+        [input.environment]: {
+          lastOperationStatus: 'TIMED_OUT',
+        },
+      },
+      operationType:
+        input.operationType === 'deploy'
+          ? 'DEPLOY'
+          : input.operationType === 'promote'
+            ? 'PROMOTE'
+            : input.operationType === 'rollback'
+              ? 'ROLLBACK'
+              : 'RETRY',
+      operationStatus: 'TIMED_OUT',
+      activeOperationId: null,
+      actorId: RETRY_ACTOR.actorId,
+      actorDisplayName: RETRY_ACTOR.actorDisplayName,
+    });
+  }
+
+  emitDeploymentMetric({
+    metricName: 'deployment.operation.finalized',
+    mappingId: input.mappingId,
+    projectId: input.projectId,
+    artifactId: input.artifactId,
+    operationId: input.orchestrationId,
+    operationType: input.operationType.toUpperCase(),
+    operationStatus: 'TIMED_OUT',
+    environment: input.environment,
+    value: retryPolicy.maxAttempts,
+    actor: RETRY_ACTOR,
+    details: {
+      errorCode: ERROR_CODES.TIMEOUT,
+    },
   });
 
   return {

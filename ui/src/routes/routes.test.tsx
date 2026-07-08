@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import {
   Route,
   RouterProvider,
@@ -7,10 +8,11 @@ import {
 } from 'react-router-dom';
 import { describe, it, vi } from 'vitest';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import CreateMapping from '@/routes/pages/CreateMapping';
 import CreateProject from '@/routes/pages/CreateProject';
+import Deployments from '@/routes/pages/Deployments';
 import HomeDashboard from '@/routes/pages/HomeDashboard';
 import MappingDeployment from '@/routes/pages/MappingDeployment';
 import MappingEditor from '@/routes/pages/MappingEditor';
@@ -77,6 +79,17 @@ const mockAdapter: ApiAdapter = {
     PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
     QA: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
   }),
+  listGlobalDeploymentSummaries: vi.fn().mockResolvedValue({
+    items: [],
+    page: { pageSize: 50, nextCursor: null, returned: 0, totalMatched: 0 },
+    summary: { failedCount: 0, attentionCount: 0 },
+  }),
+  listProjectDeploymentSummaries: vi.fn().mockResolvedValue({
+    projectId: 'abc-123',
+    items: [],
+    page: { pageSize: 50, nextCursor: null, returned: 0, totalMatched: 0 },
+    summary: { failedCount: 0, attentionCount: 0 },
+  }),
   listCdmSchemas: vi.fn(),
   linkCdmSchema: vi.fn(),
   syncAllCdmSchemas: vi.fn(),
@@ -86,6 +99,12 @@ const mockAdapter: ApiAdapter = {
   linkPublishedSchema: vi.fn(),
   autoMap: vi.fn(),
   autoMapSection: vi.fn(),
+  getAutoMapCapabilities: vi.fn(),
+  getAutoMapSession: vi.fn(),
+  startAutoMapSession: vi.fn(),
+  startAutoMapRun: vi.fn(),
+  getAutoMapRunStatus: vi.fn(),
+  listAutoMapSuggestions: vi.fn(),
   suggestExpression: vi.fn(),
   explainRule: vi.fn(),
   smartFix: vi.fn(),
@@ -118,13 +137,24 @@ const mockAdapter: ApiAdapter = {
     linkedProjects: [],
     counts: { mappings: 0, linkedProjects: 0 },
   }),
+  listProjectValueMaps: vi.fn(),
+  linkProjectValueMap: vi.fn(),
+  getProjectValueMapDetail: vi.fn(),
+  updateProjectValueMapOverlay: vi.fn(),
+  reviewProjectValueMapUpdate: vi.fn(),
+  acceptProjectValueMapUpdate: vi.fn(),
+  unlinkProjectValueMap: vi.fn(),
+  importProjectValueMapPortable: vi.fn(),
+  promoteProjectValueMap: vi.fn(),
 };
 
 function renderWithRouter(path: string) {
+  const queryClient = createQueryClient();
   const router = createMemoryRouter(
     createRoutesFromElements(
       <>
         <Route path="/" element={<HomeDashboard />} />
+        <Route path="/deployments" element={<Deployments />} />
         <Route path="/value-mappings" element={<ValueMappingsLibrary />} />
         <Route path="/value-mappings/:valueMapId" element={<ValueMappingDetail />} />
         <Route path="/projects/new" element={<CreateProject />} />
@@ -155,14 +185,16 @@ function renderWithRouter(path: string) {
   );
 
   return render(
-    <AdapterProvider adapter={mockAdapter}>
-      <RouterProvider
-        router={router}
-        future={{
-          v7_startTransition: true,
-        }}
-      />
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={mockAdapter}>
+        <RouterProvider
+          router={router}
+          future={{
+            v7_startTransition: true,
+          }}
+        />
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -178,6 +210,13 @@ describe('Route rendering', () => {
 
     expect(screen.getByTestId('page-create-project')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Create New Project' })).toBeInTheDocument();
+  });
+
+  it('renders Deployments at /deployments', () => {
+    renderWithRouter('/deployments');
+
+    expect(screen.getByTestId('page-deployments')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Deployments' })).toBeInTheDocument();
   });
 
   it('renders Global Value Mappings Library at /value-mappings', () => {
@@ -213,7 +252,6 @@ describe('Route rendering', () => {
 
     expect(screen.getByTestId('page-project-deployments')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Project Deployments' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
   });
 
   it('renders Project Value Mappings at /projects/:projectId/value-mappings', () => {

@@ -10,9 +10,10 @@ import type {
 } from '../../../src/lib/persistence/types.js';
 import { normalizeRuntimeDeploymentEnvironment } from '../../../src/lib/persistence/types.js';
 
-const { dynamoSendMock, putSnapshotMock } = vi.hoisted(() => ({
+const { dynamoSendMock, putSnapshotMock, deleteSnapshotMock } = vi.hoisted(() => ({
   dynamoSendMock: vi.fn(),
   putSnapshotMock: vi.fn(),
+  deleteSnapshotMock: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/persistence/clients.js', () => ({
@@ -23,6 +24,7 @@ vi.mock('../../../src/lib/persistence/clients.js', () => ({
 
 vi.mock('../../../src/lib/persistence/s3/deployment-snapshot.js', () => ({
   put: putSnapshotMock,
+  remove: deleteSnapshotMock,
 }));
 
 async function importModule() {
@@ -124,6 +126,7 @@ describe('persistence deployments', () => {
     vi.resetModules();
     dynamoSendMock.mockReset();
     putSnapshotMock.mockReset();
+    deleteSnapshotMock.mockReset();
   });
 
   it('create writes deployment record and updates current pointer', async () => {
@@ -671,5 +674,132 @@ describe('persistence deployments', () => {
 
     expect(queryCommand.input.KeyConditionExpression).toBe('mappingId = :mappingId');
     expect(queryCommand.input.ExpressionAttributeValues[':environmentPrefix']).toBeUndefined();
+  });
+
+  it('listRetentionCleanupTargets scans deployment history and returns unique mapping/environment targets', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({
+      Items: [
+        { mappingId: 'map-2', environment: 'DEV' },
+        { mappingId: 'map-1', environment: 'QA' },
+        { mappingId: 'map-1', environment: 'PREPROD' },
+        { mappingId: 'map-1', environment: 'PROD' },
+      ],
+    });
+
+    const targets = await mod.listRetentionCleanupTargets();
+
+    expect(targets).toEqual([
+      { mappingId: 'map-1', environment: 'PREPROD' },
+      { mappingId: 'map-1', environment: 'PROD' },
+      { mappingId: 'map-2', environment: 'DEV' },
+    ]);
+  });
+
+  it('listInProgressOperationArtifactIds returns non-terminal operation artifacts for mapping/environment', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({
+      Items: [
+        { artifactId: 'artifact-running', operationStatus: 'RUNNING' },
+        { artifactId: 'artifact-queued', operationStatus: 'QUEUED' },
+        { artifactId: 'artifact-running', operationStatus: 'RUNNING' },
+        { artifactId: 'artifact-failed', operationStatus: 'FAILED' },
+      ],
+    });
+
+    const artifacts = await mod.listInProgressOperationArtifactIds('mapping-1', 'DEV');
+    expect(artifacts).toEqual(['artifact-queued', 'artifact-running']);
+  });
+
+  it('selectRetentionCleanupCandidates applies retention ordering and protection rules', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({
+      Items: [
+        makeHistoryItem({ environment: 'DEV', environmentDeployedAt: 'DEV#2026-06-04T00:00:00.000Z', deployedAt: '2026-06-04T00:00:00.000Z', artifactId: 'artifact-a' }),
+        makeHistoryItem({ environment: 'DEV', environmentDeployedAt: 'DEV#2026-06-03T00:00:00.000Z', deployedAt: '2026-06-03T00:00:00.000Z', artifactId: 'artifact-b' }),
+        makeHistoryItem({ environment: 'DEV', environmentDeployedAt: 'DEV#2026-06-02T00:00:00.000Z', deployedAt: '2026-06-02T00:00:00.000Z', artifactId: 'artifact-c' }),
+        makeHistoryItem({ environment: 'DEV', environmentDeployedAt: 'DEV#2026-06-01T00:00:00.000Z', deployedAt: '2026-06-01T00:00:00.000Z', artifactId: 'artifact-d' }),
+      ],
+    });
+
+    const result = await mod.selectRetentionCleanupCandidates({
+      mappingId: 'mapping-1',
+      environment: 'DEV',
+      retainSuccessfulActivations: 2,
+      protection: {
+        activeArtifactId: 'artifact-d',
+        inProgressArtifactIds: ['artifact-in-progress'],
+        rollbackWindowArtifactIds: [],
+        promotionSourceArtifactIds: [],
+      },
+    });
+
+    expect(result.protectedItems.map((item) => item.artifactId)).toEqual(['artifact-a', 'artifact-b', 'artifact-d']);
+    expect(result.deleteCandidates.map((item) => item.artifactId)).toEqual(['artifact-c']);
+  });
+
+  it('updateRollbackEligibility updates rollbackEligible markers for changed history rows', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock
+      .mockResolvedValueOnce({
+        Items: [
+          makeHistoryItem({
+            environment: 'DEV',
+            environmentDeployedAt: 'DEV#2026-06-02T00:00:00.000Z',
+            artifactId: 'artifact-a',
+            rollbackEligible: true,
+          }),
+          makeHistoryItem({
+            environment: 'DEV',
+            environmentDeployedAt: 'DEV#2026-06-01T00:00:00.000Z',
+            artifactId: 'artifact-b',
+            rollbackEligible: false,
+          }),
+        ],
+      })
+      .mockResolvedValue({});
+
+    const updated = await mod.updateRollbackEligibility('mapping-1', 'DEV', ['artifact-b']);
+    expect(updated).toBe(2);
+
+    const firstUpdate = dynamoSendMock.mock.calls[1]?.[0] as {
+      input: { ExpressionAttributeValues: Record<string, unknown> };
+    };
+    const secondUpdate = dynamoSendMock.mock.calls[2]?.[0] as {
+      input: { ExpressionAttributeValues: Record<string, unknown> };
+    };
+
+    expect(firstUpdate.input.ExpressionAttributeValues[':rollbackEligible']).toBe(false);
+    expect(secondUpdate.input.ExpressionAttributeValues[':rollbackEligible']).toBe(true);
+  });
+
+  it('deleteDeploymentHistoryEntries deletes snapshot object and deployment history rows', async () => {
+    const mod = await importModule();
+    deleteSnapshotMock.mockResolvedValue(undefined);
+    dynamoSendMock.mockResolvedValue({});
+
+    const deleted = await mod.deleteDeploymentHistoryEntries([
+      makeHistoryItem({
+        mappingId: 'mapping-1',
+        environmentDeployedAt: 'DEV#2026-06-01T00:00:00.000Z',
+        configS3Key: 'deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json',
+      }),
+    ]);
+
+    expect(deleted).toBe(1);
+    expect(deleteSnapshotMock).toHaveBeenCalledWith('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
+
+    const deleteCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: { TableName: string; Key: Record<string, unknown> };
+    };
+    expect(deleteCommand.input.TableName).toBe('keyra-deployments');
+    expect(deleteCommand.input.Key).toEqual({
+      mappingId: 'mapping-1',
+      environmentDeployedAt: 'DEV#2026-06-01T00:00:00.000Z',
+    });
   });
 });

@@ -6,13 +6,13 @@ const templatePath = new URL('../../template.yaml', import.meta.url);
 const template = readFileSync(templatePath, 'utf8');
 
 describe('runtime bootstrap template (FS-100 T-05)', () => {
-  it('allows sandbox runtime environment for SANDBOX-first vertical slice', () => {
+  it('restricts runtime bootstrap environment values to dev/preprod/prod only', () => {
     const envParamBlock = template.match(/EnvironmentName:\n(?:[\s\S]*?)Description: Runtime bootstrap environment name \(FS-082\)\./);
     expect(envParamBlock?.[0]).toContain('AllowedValues:');
-    expect(envParamBlock?.[0]).toContain('- sandbox');
     expect(envParamBlock?.[0]).toContain('- dev');
     expect(envParamBlock?.[0]).toContain('- preprod');
     expect(envParamBlock?.[0]).toContain('- prod');
+    expect(envParamBlock?.[0]).not.toContain('- sandbox');
   });
 
   it('defines explicit least-privilege runtime roles', () => {
@@ -46,9 +46,7 @@ describe('runtime bootstrap template (FS-100 T-05)', () => {
     const invokeRoleBlock = template.match(/KeyRaRuntimeInvokeRole:[\s\S]*?RuntimeDeployHandlerFunction:/)?.[0] ?? '';
     expect(invokeRoleBlock).toContain('- lambda:InvokeFunction');
     expect(invokeRoleBlock).toContain('- !GetAtt RuntimeExecuteFunction.Arn');
-    expect(invokeRoleBlock).toContain('function:dev-${ServiceName}-execute');
-    expect(invokeRoleBlock).toContain('function:preprod-${ServiceName}-execute');
-    expect(invokeRoleBlock).toContain('function:prod-${ServiceName}-execute');
+    expect(invokeRoleBlock).toContain('function:kbx-integrations-keyra-runtime-execute-mapping');
     expect(invokeRoleBlock).toContain('HasRuntimeAccountIdDev');
     expect(invokeRoleBlock).toContain('HasRuntimeAccountIdPreprod');
     expect(invokeRoleBlock).toContain('HasRuntimeAccountIdProd');
@@ -65,9 +63,7 @@ describe('runtime bootstrap template (FS-100 T-05)', () => {
     expect(previewBlock).toContain('RuntimeAccountIdDev');
     expect(previewBlock).toContain('RuntimeAccountIdPreprod');
     expect(previewBlock).toContain('RuntimeAccountIdProd');
-    expect(previewBlock).toContain('function:dev-${ServiceName}-execute');
-    expect(previewBlock).toContain('function:preprod-${ServiceName}-execute');
-    expect(previewBlock).toContain('function:prod-${ServiceName}-execute');
+    expect(previewBlock).toContain('function:kbx-integrations-keyra-runtime-execute-mapping');
     expect(previewBlock).not.toContain('Policies:');
   });
 
@@ -87,6 +83,14 @@ describe('runtime bootstrap template (FS-100 T-05)', () => {
     expect(template).toContain('HasRuntimeAccountIdDev');
     expect(template).toContain('HasRuntimeAccountIdPreprod');
     expect(template).toContain('HasRuntimeAccountIdProd');
+  });
+
+  it('keeps runtime artifacts bucket naming fixed to KeyRa runtime buckets for greenfield environments', () => {
+    expect(template).toContain('kbx-b2b-keyra-dev');
+    expect(template).toContain('kbx-b2b-keyra-preprod');
+    expect(template).toContain('kbx-b2b-keyra-prod');
+    expect(template).not.toContain("'${EnvironmentName}-${ServiceName}-${AWS::AccountId}'");
+    expect(template).not.toContain('IsSandboxRuntime');
   });
 
   it('includes mapping revisions routes used by deployment page route parity', () => {
@@ -168,6 +172,12 @@ describe('runtime bootstrap template (FS-100 T-05)', () => {
     expect(runtimeRoleBlock).not.toContain('dynamodb:UpdateItem');
     expect(runtimeRoleBlock).not.toContain('s3:PutObject');
     expect(runtimeRoleBlock).not.toContain('s3:DeleteObject');
+  });
+
+  it('does not include deployment-data seeding resources in runtime bootstrap path', () => {
+    expect(template).not.toContain('Custom::');
+    expect(template).not.toContain('Seed');
+    expect(template).not.toContain('seed');
   });
 
   it('keeps gateway 4xx/5xx responses configured with CORS headers', () => {

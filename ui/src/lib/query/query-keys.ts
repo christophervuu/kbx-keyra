@@ -33,6 +33,17 @@ interface DeploymentsHistoryQuery {
   readonly environment?: RuntimeEnvironment;
 }
 
+export interface DeploymentOverviewListQuery {
+  readonly environment?: RuntimeEnvironment;
+  readonly freshness?: 'NOT_DEPLOYED' | 'CURRENT' | 'STALE';
+  readonly attentionState?: 'OK' | 'NEEDS_ATTENTION';
+  readonly operationStatus?: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT';
+  readonly version?: number;
+  readonly search?: string;
+  readonly pageSize?: number;
+  readonly cursor?: string;
+}
+
 type StableValue =
   | null
   | string
@@ -114,6 +125,12 @@ export const queryKeys = {
     summaries: () => ['deployments', 'summary'] as const,
     summary: (environment?: RuntimeEnvironment) =>
       ['deployments', 'summary', stableParams(environment ? { environment } : undefined)] as const,
+    globalOverviews: () => ['deployments', 'overview', 'global'] as const,
+    globalOverview: (query?: DeploymentOverviewListQuery) =>
+      ['deployments', 'overview', 'global', stableParams(query)] as const,
+    projectOverviews: () => ['deployments', 'overview', 'project'] as const,
+    projectOverview: (projectId: string, query?: DeploymentOverviewListQuery) =>
+      ['deployments', 'overview', 'project', projectId, stableParams(query)] as const,
     contexts: () => ['deployments', 'context'] as const,
     context: (mappingId: string) => ['deployments', 'context', mappingId] as const,
     histories: () => ['deployments', 'history'] as const,

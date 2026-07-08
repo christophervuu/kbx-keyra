@@ -1,9 +1,19 @@
 export { handler as deployMappingHandler } from './deploy-mapping.js';
+export { handler as getDeploymentOperationHandler } from './get-deployment-operation.js';
 export { handler as getCurrentDeploymentsHandler } from './get-current-deployments.js';
 export { handler as getDeploymentContextHandler } from './get-deployment-context.js';
 export { handler as listDeploymentsHandler } from './list-deployments.js';
+export { handler as listMappingDeploymentsHandler } from './list-mapping-deployments.js';
+export { handler as listProjectDeploymentsHandler } from './list-project-deployments.js';
 export { handler as promoteDeploymentHandler } from './promote-deployment.js';
+export { handler as retryDeploymentOperationHandler } from './retry-deployment-operation.js';
 export { handler as rollbackDeploymentHandler } from './rollback-deployment.js';
+export { handler as reconcileDeploymentOperationsHandler } from './reconcile-deployment-operations.js';
+export { handler as cleanupDeploymentArtifactsHandler } from './cleanup-deployment-artifacts.js';
+export { handler as startDeployOperationHandler } from './start-deploy-operation.js';
+export { handler as startPromotionOperationHandler } from './start-promotion-operation.js';
+export { handler as startRollbackOperationHandler } from './start-rollback-operation.js';
+export { evaluateVersionEligibility } from './version-eligibility.js';
 export { handler as runtimeDeployHandler } from './runtime-deploy.js';
 export { handler as runtimeRollbackHandler } from './runtime-rollback.js';
 export {

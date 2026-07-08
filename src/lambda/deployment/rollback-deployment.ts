@@ -16,6 +16,7 @@ import {
   get as getDeploymentOrchestration,
   updateStatus as updateDeploymentOrchestrationStatus,
 } from '../../lib/persistence/deployment-orchestrations.js';
+import { upsert as upsertDeploymentSummary } from '../../lib/persistence/deployment-summaries.js';
 import { DeploymentEnvironmentConfigError, getRuntimeApiClient } from './runtime-api-client.js';
 import { executeRuntimeOperationWithRetry } from './orchestration-retry.js';
 
@@ -28,6 +29,8 @@ interface RollbackRequest {
 
 interface MappingMetadata {
   readonly mappingId: string;
+  readonly projectId?: string;
+  readonly name?: string;
 }
 
 interface OrchestrationContext {
@@ -222,6 +225,8 @@ function parseRollbackRequest(body: Record<string, unknown> | null): RollbackReq
 
 async function createOrchestrationContext(input: {
   mappingId: string;
+  projectId?: string;
+  mappingName?: string;
   environment: DeploymentEnvironment;
   deploymentSK: string;
   artifactId: string;
@@ -254,6 +259,24 @@ async function createOrchestrationContext(input: {
     artifactId: input.artifactId,
     requestId,
   });
+
+  if (input.projectId && input.mappingName) {
+    await upsertDeploymentSummary({
+      mappingId: input.mappingId,
+      projectId: input.projectId,
+      mappingName: input.mappingName,
+      environmentStates: {
+        [input.environment]: {
+          lastOperationStatus: 'RUNNING',
+        },
+      },
+      operationType: 'ROLLBACK',
+      operationStatus: 'RUNNING',
+      activeOperationId: orchestration.orchestrationId,
+      actorId: 'development:system',
+      actorDisplayName: 'Development',
+    });
+  }
 
   return {
     orchestrationId: orchestration.orchestrationId,
@@ -331,6 +354,8 @@ async function buildReplayResponse(input: {
 
 async function createOrchestrationOrReplay(input: {
   mappingId: string;
+  projectId?: string;
+  mappingName?: string;
   environment: DeploymentEnvironment;
   deploymentSK: string;
   artifactId: string;
@@ -437,6 +462,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const orchestration = await createOrchestrationOrReplay({
       mappingId,
+      projectId: mapping.projectId,
+      mappingName: mapping.name,
       environment: request.environment,
       deploymentSK: request.deploymentSK,
       artifactId: targetArtifactId,
@@ -449,6 +476,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const retryResult = await executeRuntimeOperationWithRetry<void>({
       mappingId,
+      projectId: mapping.projectId,
+      mappingName: mapping.name,
       environment: request.environment,
       operationType: 'rollback',
       orchestrationId: orchestration.orchestrationId,
@@ -485,6 +514,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     if (!retryResult.ok) {
+      if (mapping.projectId && mapping.name) {
+        await upsertDeploymentSummary({
+          mappingId,
+          projectId: mapping.projectId,
+          mappingName: mapping.name,
+          environmentStates: {
+            [request.environment]: {
+              lastOperationStatus: retryResult.finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+            },
+          },
+          operationType: 'ROLLBACK',
+          operationStatus: retryResult.finalStatus === 'timed_out' ? 'TIMED_OUT' : 'FAILED',
+          activeOperationId: null,
+          actorId: 'development:system',
+          actorDisplayName: 'Development',
+        });
+      }
+
       return errorResponse(
         retryResult.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
         retryResult.message,
@@ -522,6 +569,27 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       artifactId: targetArtifactId,
       requestId: retryResult.requestId,
     });
+
+    if (mapping.projectId && mapping.name) {
+      await upsertDeploymentSummary({
+        mappingId,
+        projectId: mapping.projectId,
+        mappingName: mapping.name,
+        environmentStates: {
+          [request.environment]: {
+            activeArtifactId: created.artifactId ?? null,
+            activeVersion: created.sourceType === 'version' ? created.sourceNumber : null,
+            freshness: 'CURRENT',
+            lastOperationStatus: 'SUCCEEDED',
+          },
+        },
+        operationType: 'ROLLBACK',
+        operationStatus: 'SUCCEEDED',
+        activeOperationId: null,
+        actorId: 'development:system',
+        actorDisplayName: 'Development',
+      });
+    }
 
     return jsonResponse(201, {
       ...created,

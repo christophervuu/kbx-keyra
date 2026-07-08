@@ -13,6 +13,7 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import { remove as removeDeploymentSummary } from '../../lib/persistence/deployment-summaries.js';
 
 interface MappingMetadata {
   readonly mappingId: string;
@@ -137,6 +138,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       TableName: getMappingsTableOrThrow(),
       Key: { mappingId },
     });
+
+    await removeDeploymentSummary(mappingId);
 
     const remainingMappings = await query<MappingMetadata>({
       TableName: getMappingsTableOrThrow(),

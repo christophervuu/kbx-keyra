@@ -1572,3 +1572,138 @@ Upgrade contracts:
 
 Deployment-facing APIs must resolve schema dependencies to immutable snapshot/artifact references. Runtime execution must not resolve mutable latest schema state.
 
+---
+
+## 21) FS-106 deployment API contract addendum
+
+FS-106 defines the canonical deployment API surface for active implementation paths and removes revision-style deployment contracts.
+
+### 21.1 Canonical mutation endpoints
+
+All accepted deployment mutations are asynchronous and return `202 Accepted`.
+
+Required idempotency header for all deployment mutations:
+
+- `Idempotency-Key`
+
+Canonical endpoints:
+
+- `POST /mappings/{mappingId}/deployments`
+- `POST /mappings/{mappingId}/promotions`
+- `POST /mappings/{mappingId}/rollbacks`
+- `POST /deployment-operations/{operationId}/retry`
+- `GET /deployment-operations/{operationId}`
+
+Aggregate overview endpoints:
+
+- `GET /deployments`
+- `GET /projects/{projectId}/deployments`
+
+### 21.2 Version-only DEV deploy contract
+
+`POST /mappings/{mappingId}/deployments` accepts version-only deploy request contract:
+
+- `version` (required)
+- `targetEnvironment` (must be `DEV`)
+- `expectedActiveArtifactId` (nullable)
+- `reason` (optional)
+
+Revision/sourceType deployment inputs are rejected in FS-106 contracts.
+
+### 21.3 Promotion and rollback contracts
+
+Promotion (`POST /mappings/{mappingId}/promotions`):
+
+- allowed paths: `DEV -> PREPROD`, `PREPROD -> PROD`
+- request includes expected source and expected target active artifact IDs
+- reason policy:
+  - PREPROD promotion reason optional
+  - PROD promotion reason required
+
+Rollback (`POST /mappings/{mappingId}/rollbacks`):
+
+- request includes `environment`, `targetArtifactId`, `expectedActiveArtifactId`
+- reason required in all environments
+
+Retry (`POST /deployment-operations/{operationId}/retry`):
+
+- creates new operation ID
+- links via `retryOfOperationId`
+- reason optional
+
+### 21.4 Operation response model
+
+Accepted mutation response (`202`) includes:
+
+- `operationId`
+- `operationType`
+- `status` (`QUEUED` initially)
+- `statusUrl`
+- `requestedAt`
+
+`GET /deployment-operations/{operationId}` returns:
+
+- identifiers (`operationId`, `mappingId`, `projectId`)
+- lifecycle (`operationType`, `operationStatus`, `operationStage`)
+- source/target context (`sourceEnvironment`, `targetEnvironment`, `sourceVersion`)
+- artifact identity (`artifactId`, `artifactHash`)
+- actor/timestamps (`requestedBy`, `requestedAt`, `startedAt`, `completedAt`)
+- failure/retry fields (`failureCode`, `failureMessage`, `retryable`, `retryOfOperationId`)
+
+### 21.5 Separated domain state contracts
+
+Backend enums and storage contracts separate:
+
+- operation type,
+- operation status,
+- operation stage,
+- deployment freshness (`NOT_DEPLOYED | CURRENT | STALE`),
+- promotion state (`NOT_APPLICABLE | ALIGNED | AVAILABLE | BLOCKED`).
+
+`ROLLED_BACK` is not a deployment freshness value.
+
+### 21.6 Projection-backed aggregate reads
+
+`GET /deployments` and `GET /projects/{projectId}/deployments` are backed by control-plane deployment summary projection indexes (not mapping-first paging with in-memory post-filtering).
+
+Default sort contract:
+
+- `lastActivityAt DESC`
+- `projectName ASC`
+- `mappingName ASC`
+
+Filtering must be correct across full mapping population and pagination.
+
+### 21.7 Runtime authority and reconciliation API behavior
+
+Runtime active pointer and runtime operation status remain execution authority.
+
+Control-plane API behavior for ambiguous outcomes:
+
+- timeout/partial-failure paths must reconcile against runtime operation/pointer status,
+- projection failures after runtime success must be repairable via reconciliation,
+- scheduled reconciliation pathway is required.
+
+### 21.8 Removed environments and compatibility boundary
+
+Active executable contracts accept only `DEV`, `PREPROD`, `PROD`.
+
+`SANDBOX`, `QA`, and `STAGING` are not accepted in new executable API contracts.
+
+Legacy/archival historical mentions may remain in non-executable contexts only.
+
+### 21.9 Actor contract
+
+FS-106 actor metadata contract:
+
+- `actorType`: `USER | SERVICE | DEVELOPMENT`
+- `actorId`
+- optional `actorDisplayName`
+- optional `actorEmail`
+
+Rules:
+
+- authenticated user action -> `USER`
+- automated reconcile/cleanup -> `SERVICE`
+- local dev/no auth -> `DEVELOPMENT`
+- do not silently store generic `system` for user-initiated actions.

@@ -7,7 +7,6 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues:
-      - sandbox
       - dev
       - preprod
       - prod
@@ -139,9 +138,49 @@ Parameters:
     Default: ''
     Description: Optional runtime account id override for PROD runtime execute invoke target.
 
+  RuntimeAssumeRoleArnDev:
+    Type: String
+    Default: ''
+    Description: Optional cross-account assume-role ARN used by control-plane runtime API client for DEV runtime.
+
+  RuntimeAssumeRoleArnPreprod:
+    Type: String
+    Default: ''
+    Description: Optional cross-account assume-role ARN used by control-plane runtime API client for PREPROD runtime.
+
+  RuntimeAssumeRoleArnProd:
+    Type: String
+    Default: ''
+    Description: Optional cross-account assume-role ARN used by control-plane runtime API client for PROD runtime.
+
+  RuntimeApiAuthModeDev:
+    Type: String
+    Default: AWS_IAM
+    AllowedValues:
+      - AWS_IAM
+      - NONE
+    Description: Runtime API auth mode for DEV runtime.
+
+  RuntimeApiAuthModePreprod:
+    Type: String
+    Default: AWS_IAM
+    AllowedValues:
+      - AWS_IAM
+      - NONE
+    Description: Runtime API auth mode for PREPROD runtime.
+
+  RuntimeApiAuthModeProd:
+    Type: String
+    Default: AWS_IAM
+    AllowedValues:
+      - AWS_IAM
+      - NONE
+    Description: Runtime API auth mode for PROD runtime.
+
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
-  IsSandboxRuntime: !Equals [!Ref EnvironmentName, sandbox]
+  IsDevRuntime: !Equals [!Ref EnvironmentName, dev]
+  IsPreprodRuntime: !Equals [!Ref EnvironmentName, preprod]
   EnableAutoMapTablePitrCondition: !Equals [!Ref EnableAutoMapTablePitr, 'true']
   HasArtifactsBucketName: !Not [!Equals [!Ref ArtifactsBucketName, '']]
   HasGitHubTokenSecretArn: !Not [!Equals [!Ref GitHubTokenSecretArn, '']]
@@ -169,6 +208,14 @@ Globals:
         DEPLOYMENTS_TABLE: !Ref DeploymentsTable
         DEPLOYMENT_CURRENT_TABLE: !Ref DeploymentCurrentTable
         DEPLOYMENT_ORCHESTRATIONS_TABLE: !Ref DeploymentOrchestrationsTable
+        DEPLOYMENT_OPERATION_LOCK_TTL_SECONDS: '300'
+        DEPLOYMENT_SUMMARIES_TABLE: !Ref DeploymentSummariesTable
+        RUNTIME_ASSUME_ROLE_ARN_DEV: !Ref RuntimeAssumeRoleArnDev
+        RUNTIME_ASSUME_ROLE_ARN_PREPROD: !Ref RuntimeAssumeRoleArnPreprod
+        RUNTIME_ASSUME_ROLE_ARN_PROD: !Ref RuntimeAssumeRoleArnProd
+        RUNTIME_API_AUTH_MODE_DEV: !Ref RuntimeApiAuthModeDev
+        RUNTIME_API_AUTH_MODE_PREPROD: !Ref RuntimeApiAuthModePreprod
+        RUNTIME_API_AUTH_MODE_PROD: !Ref RuntimeApiAuthModeProd
         AUTO_MAP_TABLE: !Ref AutoMapTable
         AUTO_MAP_EXECUTION_MODE: !Ref AutoMapExecutionMode
         STORAGE_BUCKET: !Ref StorageBucket
@@ -392,6 +439,53 @@ Resources:
       KeySchema:
         - AttributeName: orchestrationId
           KeyType: HASH
+
+  DeploymentSummariesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: integrations-keyra-deployment-summaries
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mappingId
+          AttributeType: S
+        - AttributeName: globalPartition
+          AttributeType: S
+        - AttributeName: projectId
+          AttributeType: S
+        - AttributeName: attentionState
+          AttributeType: S
+        - AttributeName: lastActivityAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mappingId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: GlobalActivityIndex
+          KeySchema:
+            - AttributeName: globalPartition
+              KeyType: HASH
+            - AttributeName: lastActivityAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ProjectActivityIndex
+          KeySchema:
+            - AttributeName: projectId
+              KeyType: HASH
+            - AttributeName: lastActivityAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: AttentionIndex
+          KeySchema:
+            - AttributeName: attentionState
+              KeyType: HASH
+            - AttributeName: lastActivityAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   AutoMapTable:
     Type: AWS::DynamoDB::Table
@@ -650,6 +744,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentSummariesTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
@@ -736,6 +832,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentSummariesTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
@@ -1730,6 +1828,8 @@ Resources:
             TableName: !Ref MappingRevisionsTable
         - DynamoDBReadPolicy:
             TableName: !Ref MappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentSummariesTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
@@ -1812,22 +1912,165 @@ Resources:
         Variables:
           RUNTIME_EXECUTE_FUNCTION_ARN_DEV: !If
             - HasRuntimeAccountIdDev
-            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdDev}:function:dev-${ServiceName}-execute'
-            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:dev-${ServiceName}-execute'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdDev}:function:kbx-integrations-keyra-runtime-execute-mapping'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:kbx-integrations-keyra-runtime-execute-mapping'
           RUNTIME_EXECUTE_FUNCTION_ARN_PREPROD: !If
             - HasRuntimeAccountIdPreprod
-            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdPreprod}:function:preprod-${ServiceName}-execute'
-            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:preprod-${ServiceName}-execute'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdPreprod}:function:kbx-integrations-keyra-runtime-execute-mapping'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:kbx-integrations-keyra-runtime-execute-mapping'
           RUNTIME_EXECUTE_FUNCTION_ARN_PROD: !If
             - HasRuntimeAccountIdProd
-            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdProd}:function:prod-${ServiceName}-execute'
-            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:prod-${ServiceName}-execute'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdProd}:function:kbx-integrations-keyra-runtime-execute-mapping'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:kbx-integrations-keyra-runtime-execute-mapping'
       Events:
         ApiEvent:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
             Path: /mappings/{mappingId}/preview
+            Method: post
+
+  DeployMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-integrations-keyra-control-deploy-mapping
+      CodeUri: .
+      Handler: src/lambda/deployment/start-deploy-operation.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingVersionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentSummariesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/deployments
+            Method: post
+
+  PromoteDeploymentFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-integrations-keyra-control-promote-deployment
+      CodeUri: .
+      Handler: src/lambda/deployment/start-promotion-operation.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingVersionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentSummariesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/promotions
+            Method: post
+
+  RollbackDeploymentFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-integrations-keyra-control-rollback-deployment
+      CodeUri: .
+      Handler: src/lambda/deployment/start-rollback-operation.handler
+      # Explicitly pin required rollback env vars to avoid runtime drift when
+      # function-level environment settings are edited outside CloudFormation.
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          PROJECTS_TABLE: !Ref ProjectsTable
+          MAPPINGS_TABLE: !Ref MappingsTable
+          SCHEMA_METADATA_TABLE: !Ref SchemaMetadataTable
+          SCHEMA_NODES_TABLE: !Ref SchemaNodesTable
+          MAPPING_REVISIONS_TABLE: !Ref MappingRevisionsTable
+          MAPPING_VERSIONS_TABLE: !Ref MappingVersionsTable
+          VALUE_TABLES_TABLE: !Ref ValueTablesTable
+          VALUE_TABLE_REVISIONS_TABLE: !Ref ValueTableRevisionsTable
+          DEPLOYMENTS_TABLE: !Ref DeploymentsTable
+          DEPLOYMENT_CURRENT_TABLE: !Ref DeploymentCurrentTable
+          DEPLOYMENT_ORCHESTRATIONS_TABLE: !Ref DeploymentOrchestrationsTable
+          DEPLOYMENT_SUMMARIES_TABLE: !Ref DeploymentSummariesTable
+          STORAGE_BUCKET: !Ref StorageBucket
+          # Compatibility aliases used by existing handlers/tests.
+          SCHEMAS_TABLE: !Ref SchemaMetadataTable
+          CONTENT_BUCKET: !Ref StorageBucket
+          SCHEMA_BUCKET: !Ref StorageBucket
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingVersionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentSummariesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/rollbacks
             Method: post
 
   MappingSchemaUpgradePreviewFunction:
@@ -1894,7 +2137,7 @@ Resources:
             Path: /mappings/{mappingId}/schema-upgrade/apply
             Method: post
 
-  DeployMappingFunction:
+  RetryDeploymentOperationFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: esbuild
@@ -1905,35 +2148,21 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: kbx-keyra-deploymapping
+      FunctionName: kbx-integrations-keyra-control-retry-deployment-operation
       CodeUri: .
-      Handler: src/lambda/deployment/deploy-mapping.handler
+      Handler: src/lambda/deployment/retry-deployment-operation.handler
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingRevisionsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingVersionsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref SchemaMetadataTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref DeploymentsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref DeploymentCurrentTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentOrchestrationsTable
-        - S3CrudPolicy:
-            BucketName: !Ref StorageBucket
       Events:
         ApiEvent:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/deploy
+            Path: /deployment-operations/{operationId}/retry
             Method: post
 
-  PromoteDeploymentFunction:
+  GetDeploymentOperationFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: esbuild
@@ -1944,35 +2173,21 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: kbx-keyra-promotedeployment
+      FunctionName: kbx-integrations-keyra-control-get-deployment-operation
       CodeUri: .
-      Handler: src/lambda/deployment/promote-deployment.handler
+      Handler: src/lambda/deployment/get-deployment-operation.handler
       Policies:
         - DynamoDBReadPolicy:
-            TableName: !Ref MappingsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingRevisionsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingVersionsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref SchemaMetadataTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref DeploymentsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref DeploymentCurrentTable
-        - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentOrchestrationsTable
-        - S3CrudPolicy:
-            BucketName: !Ref StorageBucket
       Events:
         ApiEvent:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/promote
-            Method: post
+            Path: /deployment-operations/{operationId}
+            Method: get
 
-  RollbackDeploymentFunction:
+  ReconcileDeploymentOperationsFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: esbuild
@@ -1983,52 +2198,56 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: kbx-keyra-rollbackdeployment
+      FunctionName: kbx-integrations-keyra-control-reconcile-deployments
       CodeUri: .
-      Handler: src/lambda/deployment/rollback-deployment.handler
-      # Explicitly pin required rollback env vars to avoid runtime drift when
-      # function-level environment settings are edited outside CloudFormation.
-      Environment:
-        Variables:
-          STAGE: !Ref Stage
-          PROJECTS_TABLE: !Ref ProjectsTable
-          MAPPINGS_TABLE: !Ref MappingsTable
-          SCHEMA_METADATA_TABLE: !Ref SchemaMetadataTable
-          SCHEMA_NODES_TABLE: !Ref SchemaNodesTable
-          MAPPING_REVISIONS_TABLE: !Ref MappingRevisionsTable
-          MAPPING_VERSIONS_TABLE: !Ref MappingVersionsTable
-          VALUE_TABLES_TABLE: !Ref ValueTablesTable
-          VALUE_TABLE_REVISIONS_TABLE: !Ref ValueTableRevisionsTable
-          DEPLOYMENTS_TABLE: !Ref DeploymentsTable
-          DEPLOYMENT_CURRENT_TABLE: !Ref DeploymentCurrentTable
-          DEPLOYMENT_ORCHESTRATIONS_TABLE: !Ref DeploymentOrchestrationsTable
-          STORAGE_BUCKET: !Ref StorageBucket
-          # Compatibility aliases used by existing handlers/tests.
-          SCHEMAS_TABLE: !Ref SchemaMetadataTable
-          CONTENT_BUCKET: !Ref StorageBucket
-          SCHEMA_BUCKET: !Ref StorageBucket
+      Handler: src/lambda/deployment/reconcile-deployment-operations.handler
+      Timeout: 60
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingRevisionsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingVersionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentSummariesTable
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Name: keyra-reconcile-deployment-operations
+            Description: Reconcile timed-out/stuck deployment operations and repair projection drift
+            Enabled: true
+
+  CleanupDeploymentArtifactsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-integrations-keyra-control-cleanup-deployment-artifacts
+      CodeUri: .
+      Handler: src/lambda/deployment/cleanup-deployment-artifacts.handler
+      Timeout: 300
+      Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentsTable
-        - DynamoDBCrudPolicy:
+        - DynamoDBReadPolicy:
             TableName: !Ref DeploymentCurrentTable
-        - DynamoDBCrudPolicy:
+        - DynamoDBReadPolicy:
             TableName: !Ref DeploymentOrchestrationsTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
-        ApiEvent:
-          Type: Api
+        Schedule:
+          Type: Schedule
           Properties:
-            RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/rollback
-            Method: post
+            Schedule: rate(5 minutes)
+            Name: keyra-cleanup-deployment-artifacts
+            Description: Enforce per-environment deployment artifact retention and rollback eligibility updates
+            Enabled: true
 
   ListDeploymentsFunction:
     Type: AWS::Serverless::Function
@@ -2041,9 +2260,59 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: kbx-keyra-listdeployments
+      FunctionName: kbx-integrations-keyra-control-list-deployments
       CodeUri: .
       Handler: src/lambda/deployment/list-deployments.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref DeploymentSummariesTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /deployments
+            Method: get
+
+  ListProjectDeploymentsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-integrations-keyra-control-list-project-deployments
+      CodeUri: .
+      Handler: src/lambda/deployment/list-project-deployments.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref DeploymentSummariesTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/deployments
+            Method: get
+
+  ListMappingDeploymentsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-integrations-keyra-control-list-mapping-deployments
+      CodeUri: .
+      Handler: src/lambda/deployment/list-mapping-deployments.handler
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref MappingsTable
@@ -2068,7 +2337,7 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: kbx-keyra-getcurrentdeployments
+      FunctionName: kbx-integrations-keyra-control-get-current-deployments
       CodeUri: .
       Handler: src/lambda/deployment/get-current-deployments.handler
       Policies:
@@ -2095,7 +2364,7 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: kbx-keyra-getdeploymentcontext
+      FunctionName: kbx-integrations-keyra-control-get-deployment-context
       CodeUri: .
       Handler: src/lambda/deployment/get-deployment-context.handler
       Policies:
@@ -2319,6 +2588,7 @@ Resources:
                   - HasAutoMapStepFunctionsArn
                   - !Ref AutoMapStepFunctionsArn
                   - !Ref AWS::NoValue
+                - !Ref AutoMapStateMachine
                 - !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:kbx-keyra-auto-map-orchestration'
       Events:
         ApiEvent:
@@ -2923,13 +3193,16 @@ Resources:
     Properties:
       Name: !Sub '${EnvironmentName}-${ServiceName}-api'
       StageName: !Ref ApiStageName
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+        EnableIamAuthorizer: true
 
   RuntimeActiveSnapshotsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: !Sub '${EnvironmentName}-${ServiceName}-active-snapshots'
+      TableName: integrations-keyra-runtime-active-snapshots
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: mappingId
@@ -2943,7 +3216,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: !Sub '${EnvironmentName}-${ServiceName}-deployment-history'
+      TableName: integrations-keyra-runtime-deployment-history
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: mappingId
@@ -2964,7 +3237,13 @@ Resources:
       BucketName: !If
         - HasArtifactsBucketName
         - !Ref ArtifactsBucketName
-        - !Sub '${EnvironmentName}-${ServiceName}-${AWS::AccountId}'
+        - !If
+          - IsDevRuntime
+          - kbx-b2b-keyra-dev
+          - !If
+            - IsPreprodRuntime
+            - kbx-b2b-keyra-preprod
+            - kbx-b2b-keyra-prod
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -3094,16 +3373,16 @@ Resources:
                   - !GetAtt RuntimeExecuteFunction.Arn
                   - !If
                     - HasRuntimeAccountIdDev
-                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdDev}:function:dev-${ServiceName}-execute'
-                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:dev-${ServiceName}-execute'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdDev}:function:kbx-integrations-keyra-runtime-execute-mapping'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:kbx-integrations-keyra-runtime-execute-mapping'
                   - !If
                     - HasRuntimeAccountIdPreprod
-                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdPreprod}:function:preprod-${ServiceName}-execute'
-                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:preprod-${ServiceName}-execute'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdPreprod}:function:kbx-integrations-keyra-runtime-execute-mapping'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:kbx-integrations-keyra-runtime-execute-mapping'
                   - !If
                     - HasRuntimeAccountIdProd
-                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdProd}:function:prod-${ServiceName}-execute'
-                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:prod-${ServiceName}-execute'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdProd}:function:kbx-integrations-keyra-runtime-execute-mapping'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:kbx-integrations-keyra-runtime-execute-mapping'
 
   RuntimeDeployHandlerFunction:
     Type: AWS::Serverless::Function
@@ -3116,7 +3395,7 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-deploy'
+      FunctionName: kbx-integrations-keyra-runtime-ingest-artifact
       CodeUri: .
       Handler: src/lambda/deployment/runtime-deploy.handler
       Role: !GetAtt KeyRaDeploymentWriterRole.Arn
@@ -3148,7 +3427,7 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-execute'
+      FunctionName: kbx-integrations-keyra-runtime-execute-mapping
       CodeUri: .
       Handler: src/lambda/runtime/execute.handler
       MemorySize: 512
@@ -3181,7 +3460,7 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-status'
+      FunctionName: kbx-integrations-keyra-runtime-get-operation
       CodeUri: .
       Handler: src/lambda/runtime/status.handler
       Role: !GetAtt KeyRaRuntimeRole.Arn
@@ -3219,7 +3498,7 @@ Resources:
         External:
           - '@aws-sdk/*'
     Properties:
-      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-rollback'
+      FunctionName: kbx-integrations-keyra-runtime-rollback-artifact
       CodeUri: .
       Handler: src/lambda/deployment/runtime-rollback.handler
       Role: !GetAtt KeyRaDeploymentWriterRole.Arn

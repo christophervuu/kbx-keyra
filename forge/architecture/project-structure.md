@@ -97,16 +97,27 @@ src/
       deploy-mapping.ts POST /mappings/:mappingId/deploy handler (revision/version deploy with environment policy enforcement)
       promote-deployment.ts POST /mappings/:mappingId/promote handler (version-backed promotion only)
       rollback-deployment.ts POST /mappings/:mappingId/rollback handler (history rollback with rollbackOf linkage)
+      start-deploy-operation.ts POST /mappings/:mappingId/deployments handler (FS-106 async operation contract: version-only DEV deploy request + Idempotency-Key + 202 operation envelope)
+      start-promotion-operation.ts POST /mappings/:mappingId/promotions handler (FS-106 async operation contract: sequential promotion request + reason policy + 202 operation envelope)
+      start-rollback-operation.ts POST /mappings/:mappingId/rollbacks handler (FS-106 async operation contract: rollback request + mandatory reason + 202 operation envelope)
+      retry-deployment-operation.ts POST /deployment-operations/:operationId/retry handler (FS-106 retry contract: new operationId linked via retryOfOperationId)
+      get-deployment-operation.ts GET /deployment-operations/:operationId handler (FS-106 operation status polling model)
+      reconcile-deployment-operations.ts Scheduled control-plane reconciliation worker for timed-out/stuck operation finalization and projection mismatch repair (FS-106 T-05)
+      cleanup-deployment-artifacts.ts Scheduled control-plane retention cleanup worker enforcing per-environment artifact retention/protection and rollback-eligibility updates (FS-106 T-08)
       get-deployment-context.ts GET /mappings/:mappingId/deploy-context handler (aggregate deployment bootstrap payload for mapping/project/environment status)
       runtime-deploy.ts Internal runtime POST /internal/deploy handler (FS-082 T-04) — validates runtime deploy payload, persists immutable runtime snapshot, updates active pointer, appends history
       runtime-rollback.ts Internal runtime POST /internal/rollback handler (FS-082 T-04) — validates snapshot presence in runtime history, repoints active pointer, appends rollback event
-      list-deployments.ts GET /mappings/:mappingId/deployments handler (optional environment filter)
+      list-deployments.ts GET /deployments handler (projection-backed global deployment summaries with filter/sort/cursor pagination)
+      list-project-deployments.ts GET /projects/:projectId/deployments handler (projection-backed project deployment summaries with filter/sort/cursor pagination)
+      list-mapping-deployments.ts GET /mappings/:mappingId/deployments handler (mapping deployment history; optional environment filter)
+      deployment-summary-listing.ts Shared aggregate deployment summary filtering/sorting/cursor pagination helpers for global/project list handlers (FS-106 T-03)
       get-current-deployments.ts GET /mappings/:mappingId/deployments/current handler
       runtime-relay.ts Shared runtime artifact relay module for control-plane deploy/promote (artifact identity/hash construction, payload-size guard, runtime relay client abstraction) (FS-081 T-03)
       environment-config.ts Runtime environment configuration loader/validator (persisted settings canonical + env fallback), including endpoint/timeouts/retry policy schema (FS-083 T-02)
       runtime-api-client.ts Typed runtime internal API client contracts (deploy/rollback/preview/status), requestId propagation, timeout handling, and error envelope normalization (FS-083 T-02)
       runtime-invoke-client.ts Direct runtime execute Lambda invoke client for server-side preview (environment-to-function ARN resolution, canonical response mapping, normalized invoke failures) (FS-100 T-07)
       orchestration-retry.ts Shared control-plane orchestration retry/reconciliation helper (retry/backoff/jitter, timeout status polling, and terminal status mapping) (FS-083 T-05)
+      version-eligibility.ts Version-only deployment eligibility checks from immutable version pinned state (FS-106 T-07)
       index.ts          Deployment lambda barrel exports
     runtime/          Runtime execution/status lambdas (FS-082 T-05)
       execute.ts        Internal runtime POST /internal/execute handler — resolves active snapshot from runtime-local DynamoDB/S3 only and executes mapping
@@ -156,17 +167,20 @@ src/
       mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
       mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
       value-tables.ts    Project value-table persistence operations (metadata/revisions/usage/resolve helpers) (FS-096 T-04)
-      deployments.ts    Deployments + DeploymentCurrent persistence operations (create/getCurrent/getCurrentAll/listHistory) with immutable snapshot writes (FS-064 T-01)
+      deployments.ts    Deployments + DeploymentCurrent persistence operations (create/getCurrent/getCurrentAll/listHistory), retention cleanup target/candidate selection, in-progress operation protection checks, rollback-eligibility updates, and immutable snapshot writes (FS-064 T-01, FS-106 T-08)
       deployment-orchestrations.ts Control-plane orchestration persistence operations (create/get/updateStatus) for deploy/promote lifecycle transitions (FS-083 T-03)
+      deployment-summaries.ts Control-plane deployment projection persistence operations (`initialize`/`upsert`/`remove`) for global/project read-model rows and activity/attention indexes (FS-106 T-02)
       s3/               Shared S3 content helpers for schemas and mappings
         index.ts          S3 helper barrel exports
         schema-content.ts Schema original/processed content put/get/delete helpers
         mapping-config.ts Mapping config put/get/delete helpers
         value-table-revisions.ts Value-table revision row payload helpers (put/get/delete immutable S3 JSON) (FS-096 T-04)
-        deployment-snapshot.ts Immutable deployment snapshot S3 helper (put)
+        deployment-snapshot.ts Immutable deployment snapshot S3 helper (put/delete) plus runtime snapshot hash verification helpers
     deployment/       Shared deployment utility logic (FS-064 T-03)
       index.ts          Deployment utility barrel exports
       staleness.ts      Pure deployment staleness computation helpers (computeStaleness, computeAllEnvironments)
+      artifact-bundle.ts Self-contained deployment artifact bundle builder + manifest/hash helpers (FS-106 T-06)
+      retention-policy.ts Per-environment deployment retention policy constants/helpers (DEV=20, PREPROD=20, PROD=50) (FS-106 T-08)
     schema/           Schema ingestion shared contracts and utilities (FS-056 T-01)
       index.ts          Schema module barrel exports
       types.ts          Schema ingestion/query interfaces and unions
@@ -219,15 +233,16 @@ ui/
   src/
     main.tsx              App entry point
     App.tsx               Root component and router setup
-    routes/               Route path constants and placeholder pages
+    routes/               Route path constants and route page wrappers
       index.ts            Barrel export for route constants
       paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test-lab' (FS-021 T-05, FS-032 T-01), PROJECT_VALUE_MAPPINGS = '/projects/:projectId/value-mappings' (FS-096 T-06), VALUE_MAPPINGS = '/value-mappings', and VALUE_MAPPING_DETAIL = '/value-mappings/:valueMapId' (FS-102 T-07)
       pages/              Placeholder page components (one per route)
         HomeDashboard.tsx   Renders HomeDashboardPage from features/home (FS-014 T-11)
+        Deployments.tsx     Renders DeploymentOverviewPage (global `/deployments`) from features/deployments (FS-106 T-09)
         CreateProject.tsx          Renders CreateProjectPage from features/projects (FS-013 T-09)
         ProjectOverview.tsx       Renders ProjectOverviewPage from features/projects (FS-013 T-08)
         ProjectSettings.tsx
-        ProjectDeployments.tsx
+        ProjectDeployments.tsx      Renders project-scoped DeploymentOverviewPage with breadcrumb label hydration (FS-106 T-09)
         ProjectValueMappings.tsx   Renders ProjectValueMappingsPage from features/projects (FS-096 T-06)
         CreateMapping.tsx          Renders CreateMappingPage from features/projects (FS-013 T-10)
         MappingEditor.tsx
@@ -247,6 +262,10 @@ ui/
             index.ts                 Components barrel
             DeploymentPage.tsx       Canonical four-stage deployment pipeline UI (SANDBOX→DEV→PREPROD→PROD): candidate/readiness/action/history panels, promote/deploy/rollback confirmations, and normalized technical error details expansion (FS-100 T-08)
             DeploymentPage.test.tsx  Component tests for four-stage ordering, stage-specific primary actions, readiness gating, combined-history metadata, and normalized backend error technical-details + request-id presentation (FS-100 T-08)
+            DeploymentOverviewPage.tsx Shared global/project deployment overview page composition (read-only filters, summary counters, projection-backed table + pagination, and drill-down links) (FS-106 T-09)
+            DeploymentOverviewPage.test.tsx Component tests for global/project overview rendering, filter/pagination calls, and drill-down link behavior (FS-106 T-09)
+            DeploymentOverviewFilters.tsx Shared filter strip (environment/freshness/attention/operation status/search) used by global/project overviews (FS-106 T-09)
+            DeploymentOverviewTable.tsx Shared projection row table renderer with status/freshness cells, keyboard-accessible links, and load-more pagination controls (FS-106 T-09)
             EnvironmentSelector.tsx  Legacy tab-style environment selector component (retained for compatibility during FS-100 deployment UX migration)
             RevisionDeploySection.tsx  Legacy revision list deploy section (retained for compatibility during FS-100 deployment UX migration)
             VersionDeploySection.tsx   Legacy version list deploy section (retained for compatibility during FS-100 deployment UX migration)
@@ -255,6 +274,8 @@ ui/
             deployment-query-data.ts Deployment page query loader (deploy-context bootstrap + versions/current/history normalization) reused by canonical query and prefetch definitions (FS-103 T-07)
             use-deployment-page.ts   Query-backed deployment page hook: SANDBOX-first deploy-context bootstrap, cached versions/current/history loading, window-focus refresh for deployment-sensitive data, normalized mutation error technical-details mapping, and editor prefetch intent wiring (FS-100 T-08, FS-103 T-04/T-07)
             use-deployment-page.test.tsx Hook tests for SANDBOX-default bootstrap, deploy-context structured error details, and deploy mutation technical-details mapping (FS-100 T-08)
+            use-deployment-overview.ts Query-backed global/project deployment overview hooks using projection list APIs and canonical deployment query keys/policies (FS-106 T-09)
+            use-deployment-overview.test.tsx Hook tests for global/project projection list query wiring and filter forwarding (FS-106 T-09)
         schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
         index.ts          Feature barrel (re-exports shared types + parsers + hooks + components)
         types.ts          Feature-specific types (SchemaTreeViewProps, SchemaParseError, parser fn types, SchemaLibraryItem, SchemaLibraryFilters, SchemaLibrarySort, SyncStatus, DisplayFormat — FS-016 T-01)
@@ -928,6 +949,9 @@ tests/
       preview-mapping.test.ts Server preview handler tests (runtime environment routing, local active-artifact execution, provenance metadata, not-deployed behavior) (FS-081 T-05)
     deployment/       Deployment lambda handler tests (FS-064 T-02)
       deployment-handlers.test.ts Unit tests for deploy/promote/rollback/list/current handlers and policy/error behavior
+      deployment-operations.test.ts Unit tests for FS-106 async deploy/promote/rollback/retry/get-operation handler contracts
+      reconcile-deployment-operations.test.ts Unit tests for scheduled runtime-authority reconciliation outcomes and projection updates
+      cleanup-deployment-artifacts.test.ts Unit tests for scheduled retention cleanup behavior, protection rules, and rollback-eligibility updates (FS-106 T-08)
       fixtures/
         fs100-ae12-runtime-lifecycle.ts Deterministic AE-12 lifecycle fixture (mapping versions, payload, expected outputs)
       runtime-environment-config.test.ts Unit tests for deployment environment config parsing/validation and runtime API client contract/error normalization (FS-083 T-02)
@@ -1011,8 +1035,10 @@ tests/
         deployment-snapshot.test.ts Deployment snapshot helper tests (put + runtime put idempotency/hash mismatch + read/hash verification)
     deployment/       Deployment shared utility tests (FS-064 T-03)
       staleness.test.ts Staleness computation tests (revision/version current+stale, not-deployed, latestVersion edge case)
+      artifact-bundle.test.ts Artifact bundle determinism/hash invariants tests (FS-106 T-06)
   scripts/            Repository script/config policy tests
     check-ui-ai-guardrails.test.ts Static policy test for path-based UI AI guardrail scanner
+    check-removed-deployment-environments.test.ts Removed-environment executable-path gate test for FS-106 runtime contract cleanup
     run-fs091-cutover-readiness.test.ts FS-091 cutover readiness report runner contract test (go/no-go + rollback trigger outputs)
     ui-eslint-ai-guardrails.test.ts Static policy test for UI ESLint restricted-import guardrail declarations
   integration/        Integration and performance test suites (Vitest)
